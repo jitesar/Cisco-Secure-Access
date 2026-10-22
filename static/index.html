@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1220"><title>CSA · Přenosy dat</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/backup.js" defer></script><script src="/settings.js" defer></script><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/">▥ <span>CSA<span class="brandlight"> / Traffic</span></span></a><div class="header-tools"><button type="button" id="open-settings" class="secondary" data-i18n="settingsButton">Nastavení S3</button><span class="local"><i></i><span data-i18n="local">Lokální aplikace · S3</span></span><div class="languages" role="group" aria-label="Jazyk / Language"><button type="button" data-lang="cs" lang="cs" aria-pressed="true">Čeština</button><button type="button" data-lang="en" lang="en" aria-pressed="false">English</button></div></div></header>
+<main>
+<section class="heading"><div><p class="eyebrow">CISCO SECURE ACCESS</p><h1 data-i18n="heading">Přenosy pod kontrolou.</h1><p class="subtitle" data-i18n="subtitle">Objem dat podle sítě, identity a času.</p></div><div class="syncbox"><button id="sync" class="primary" data-i18n="loadLogs">↻ Načíst nové logy</button><span id="syncstatus" aria-live="polite" data-i18n="ready">Připraveno k načtení</span></div></section>
+<section id="setupbanner" class="historybox" hidden><strong data-i18n="setupRequired">Nejprve připoj S3 úložiště.</strong><p data-i18n="settingsFirst">Zadej S3 cestu a klíče v nastavení. Konfigurace v terminálu není potřeba.</p><button type="button" id="setup-button" class="primary" data-i18n="settingsButton">Nastavení S3</button></section>
+<p id="connectiontoast" class="connectiontoast" role="status" hidden data-i18n="settingsSaved">Připojení bylo uloženo. Načítám logy.</p>
+<form id="filters" class="panel filters"><fieldset id="filtercontrols" disabled>
+<div class="sourcebar"><div class="tabs" role="group" aria-label="Zdroj měření" data-i18n-aria="sourceGroup"><button type="button" class="tab active" data-source="firewall" data-i18n="firewall">Cloud Firewall</button><button type="button" class="tab" data-source="proxy" data-i18n="proxy">Web proxy</button></div><span id="sourcedesc" data-i18n="sourceFirewall">Přenosy síťových relací</span></div>
+<div class="filtergrid"><label><span data-i18n="filterBy">Filtrovat podle</span><select id="mode"><option value="all" data-i18n="allSources">Všechny zdroje</option><option value="subnet" data-i18n="ipNetworks">IP adresy / sítě</option><option value="identity" data-i18n="identity">Identita</option></select></label>
+<label id="subnetfield" hidden><span data-i18n="ipNetworks">IP adresy / sítě</span><textarea id="subnet" rows="2" placeholder="10.20.0.0/16, 10.30.0.1-10.30.0.50&#10;10.40.0.5; 10.40.0.8" spellcheck="false" aria-describedby="iphelp"></textarea><small id="iphelp" data-i18n="ipHelp">IP, CIDR či rozsah od–do. Odděl čárkou, středníkem, mezerou nebo novým řádkem.</small></label>
+<label id="identityfield" hidden><span data-i18n="identity">Identita</span><select id="identity"><option value="" data-i18n="chooseIdentity">Vyber identitu</option></select></label>
+<label><span data-i18n="trafficType">Druh provozu</span><select id="scope"><option value="all" data-i18n="allTraffic">Veškerý zaznamenaný</option><option value="internet" data-i18n="internet">Internet · potvrzený</option><option value="private" data-i18n="private">Private Access · potvrzený</option><option value="unknown" data-i18n="unknownTraffic">Nerozlišený provoz</option></select></label>
+<label><span data-i18n="from">Od</span><input type="datetime-local" id="from" required></label><label><span data-i18n="to">Do</span><input type="datetime-local" id="to" required></label><button type="submit" class="primary apply" data-i18n="showTraffic">Zobrazit přenosy →</button></div>
+<div class="presets"><span data-i18n="quickSelect">Rychlý výběr</span><button type="button" data-hours="1" data-i18n="hour1">1 hodina</button><button type="button" data-hours="24" class="selected" data-i18n="hours24">24 hodin</button><button type="button" data-hours="72" data-i18n="days3">3 dny</button><button type="button" data-hours="168" data-i18n="days7">7 dní</button><button type="button" data-hours="720" data-i18n="days30">30 dní</button><span class="timezone" data-i18n="timezone">Časy: Europe/Prague</span></div>
+</fieldset></form>
+<p class="intervalhint" data-i18n="intervalHint">Vlastní interval nastav v polích Od a Do, kdekoliv v posledních 30 dnech.</p>
+<div class="historybox" id="historybox" aria-live="polite"><strong id="historyinfo" data-i18n="checkingHistory">Ověřuji dostupnou historii…</strong><p id="historydetail"></p></div>
+<div id="error" class="error" role="alert" hidden></div>
+<div class="notice" id="notice" data-i18n="notice">Firewall a web proxy jsou samostatná měření. Jejich objemy nesčítáme, protože se provoz může překrývat.</div>
+<section class="metrics" aria-label="Souhrn přenosů" data-i18n-aria="summary"><article class="metric total"><span data-i18n="total">Celkový přenos</span><strong id="total">—</strong><small id="recordcount" data-i18n="selectPeriod">Vyber období</small></article><article class="metric"><span><b class="dot teal"></b><span data-i18n="receivedData">Přijatá data</span></span><strong id="received">—</strong><small id="rxhint">Bytes Received</small></article><article class="metric"><span><b class="dot violet"></b><span data-i18n="sentData">Odeslaná data</span></span><strong id="sent">—</strong><small id="txhint">Bytes Sent</small></article><article class="metric"><span data-i18n="averageRate">Průměrná rychlost</span><strong id="rate">—</strong><small data-i18n="averageHint">Průměr za celý vybraný interval</small></article></section>
+<section class="panel chartpanel"><div class="panelheading"><div><h2 data-i18n="chartTitle">Průběh přenosů</h2><p id="chartcaption" data-i18n="hourlyVolume">Objem dat za hodinu</p></div><div class="legend"><span><b class="dot teal"></b><span data-i18n="received">Přijato</span></span><span><b class="dot violet"></b><span data-i18n="sent">Odesláno</span></span></div></div><div id="chartwrap"><canvas id="chart" role="img" aria-label="Hodinový graf přijatých a odeslaných dat" data-i18n-aria="chartAria"></canvas><div id="tooltip" hidden></div><div id="empty" hidden><strong data-i18n="emptyTitle">Pro tento výběr nemáme záznamy.</strong><span data-i18n="emptyHint">Zkus širší období, jiný filtr nebo načti nové logy.</span></div></div><p class="chartnote" data-i18n="chartNote">Hodiny bez záznamů zobrazujeme jako 0 zaznamenaných bajtů. Nejde o potvrzení úplnosti logování.</p></section>
+<section class="panel bottom"><div class="panelheading"><div><h2 data-i18n="topTitle">Nejaktivnější zdrojové IP</h2><p data-i18n="topHint">Nejvýše 20 adres podle objemu dat</p></div><button id="export" class="secondary" disabled data-i18n="exportCSV">↓ Export CSV</button></div><div class="tablewrap"><table><thead><tr><th data-i18n="sourceIP">Zdrojová IP</th><th data-i18n="share">Podíl</th><th data-i18n="received">Přijato</th><th data-i18n="sent">Odesláno</th><th data-i18n="totalColumn">Celkem</th></tr></thead><tbody id="top"></tbody></table></div></section>
+<footer><span id="coverage" data-i18n="emptyCache">Lokální cache zatím neobsahuje data.</span><span>CSA Traffic · v0.6</span></footer>
+<details class="method"><summary data-i18n="methodTitle">Co přesně měříme?</summary><p data-i18n="method1"></p><p data-i18n="method2"></p><p data-i18n="method3"></p></details>
+</main>
+<dialog id="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-intro">
+  <div class="settings-head"><div><p class="eyebrow">CISCO SECURE ACCESS</p><h2 id="settings-title" data-i18n="settingsTitle">Připojení k S3</h2></div><button type="button" id="settings-close" class="settings-close" data-i18n-aria="settingsClose" aria-label="Zavřít nastavení">×</button></div>
+  <div class="languages settings-languages" role="group" aria-label="Jazyk / Language"><button type="button" data-lang="cs" lang="cs" aria-pressed="true">Čeština</button><button type="button" data-lang="en" lang="en" aria-pressed="false">English</button></div>
+  <p id="settings-intro" data-i18n="settingsIntro">Připoj úložiště s logy Cisco Secure Access. S3 cestu a klíče najdeš v Log Managementu.</p>
+
+  <details id="backup-panel" class="backup-panel">
+    <summary data-i18n="backupTitle">Záloha a obnova konfigurace</summary>
+    <p class="settings-hint" data-i18n="backupIntro">Přenes S3 cestu, region, přístupové klíče a jazyk v souboru šifrovaném heslem. Logy se nezálohují.</p>
+    <p id="backup-setuphint" class="settings-hint" data-i18n="backupSetupHint">Nemáš ještě připojení? Existující zálohu můžeš obnovit níže.</p>
+    <form id="backup-export-form" autocomplete="off"><fieldset id="backup-export-fields">
+      <h3 data-i18n="backupExportTitle">Vytvořit zálohu</h3>
+      <label><span data-i18n="backupPassword">Heslo zálohy (alespoň 12 znaků)</span><input id="backup-password" type="password" minlength="12" maxlength="1024" required autocomplete="off"></label>
+      <label><span data-i18n="backupConfirm">Heslo znovu</span><input id="backup-confirm" type="password" minlength="12" maxlength="1024" required autocomplete="off"></label>
+      <p class="settings-hint" data-i18n="backupPasswordHint">Heslo ulož odděleně od souboru. Bez něj zálohu nelze obnovit.</p>
+      <button type="submit" class="secondary" data-i18n="backupDownload">Stáhnout šifrovanou zálohu</button>
+    </fieldset></form>
+    <form id="backup-restore-form" autocomplete="off"><fieldset id="backup-restore-fields">
+      <h3 data-i18n="backupRestoreTitle">Obnovit zálohu</h3>
+      <label><span data-i18n="backupFile">Soubor zálohy (.csabackup)</span><input id="restore-file" type="file" accept=".csabackup,.json,application/json" required></label>
+      <label><span data-i18n="backupRestorePassword">Heslo zálohy</span><input id="restore-password" type="password" maxlength="1024" required autocomplete="off"></label>
+      <p class="settings-hint" data-i18n="backupRestoreHint">Obnova ověří S3 přístup a nahradí současné připojení. Při chybě zůstane současné nastavení zachované.</p>
+      <button type="submit" class="primary" data-i18n="backupRestore">Obnovit a připojit</button>
+    </fieldset></form>
+    <p id="backup-message" class="settings-message" role="status" aria-live="polite" hidden></p>
+  </details>
+  <form id="settings-form" autocomplete="off"><fieldset id="settings-fields">
+    <label class="full"><span data-i18n="settingsPath">S3 Data Path</span><input id="settings-path" type="text" placeholder="s3://bucket/customer-prefix/" required spellcheck="false" autocomplete="off"></label>
+    <label class="full"><span data-i18n="settingsRegion">AWS region</span><input id="settings-region" type="text" placeholder="eu-central-1" required spellcheck="false" autocomplete="off"></label>
+    <label><span data-i18n="settingsAccess">Access Key ID</span><input id="settings-access" type="password" autocomplete="off" spellcheck="false"></label>
+    <label><span data-i18n="settingsSecret">Secret Access Key</span><input id="settings-secret" type="password" autocomplete="off" spellcheck="false"></label>
+    <p class="full settings-hint" id="settings-keyhint"></p>
+    <p class="full settings-storage" data-i18n="settingsStorage">Klíče se ukládají lokálně mimo aplikaci a export. Uložené hodnoty se v prohlížeči nezobrazují.</p>
+    <div class="full settings-actions"><button id="settings-test" type="button" class="secondary" data-i18n="settingsTest">Otestovat spojení</button><button type="submit" id="settings-save" class="primary" data-i18n="settingsSave">Uložit a připojit</button></div>
+  </fieldset></form>
+  <p id="settings-message" class="settings-message" role="status" aria-live="polite" hidden></p>
+</dialog>
+</body></html>

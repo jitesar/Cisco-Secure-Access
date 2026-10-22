@@ -1,0 +1,11 @@
+.cache/
+__pycache__/
+*.pyc
+credentials*.json
+!credentials.example.json
+config.json
+*.zip
+.env
+dashboard-preview*.png
+*.csabackup
+.DS_Store

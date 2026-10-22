@@ -1,0 +1,5 @@
+{
+  "s3Path": "s3://YOUR_BUCKET/YOUR_CUSTOMER_PREFIX/",
+  "region": "eu-central-1",
+  "credentialsFile": "credentials.json"
+}
