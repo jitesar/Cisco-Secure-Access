@@ -2,6 +2,8 @@
 
 Local application, version 0.6, for analyzing traffic volumes from Cisco Secure Access logs exported to Amazon S3. Filter by subnet, IP range, address list or identity, select a time period within the last 30 days, and view upload/download totals and an hourly chart.
 
+![CSA Traffic dashboard showing subnet filters, traffic totals and an hourly chart](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.6/csa-traffic-dashboard.png)
+
 The application runs on your computer and reads your S3 logs. It requires Python 3.10+ and curl 7.75+ with `--aws-sigv4` support. There are no third-party Python or JavaScript dependencies. A current browser with Web Crypto support is required for encrypted configuration backups.
 
 ## Quick start
