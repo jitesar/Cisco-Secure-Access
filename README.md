@@ -1,84 +1,182 @@
-# CSA Traffic — lokální verze 0.6
+# CSA Traffic — Cisco Secure Access Traffic Dashboard
 
-Dashboard pro čtení Cisco Secure Access S3 logů. Python 3.10+ a curl s podporou `--aws-sigv4` (7.75+). Žádné externí Python ani JavaScript závislosti.
+Local application, version 0.6, for analyzing traffic volumes from Cisco Secure Access logs exported to Amazon S3. Filter by subnet, IP range, address list or identity, select a time period within the last 30 days, and view upload/download totals and an hourly chart.
 
-## První spuštění na jiném počítači
+The application runs on your computer and reads your S3 logs. It requires Python 3.10+ and curl 7.75+ with `--aws-sigv4` support. There are no third-party Python or JavaScript dependencies. A current browser with Web Crypto support is required for encrypted configuration backups.
 
-1. Stáhni repository přes **Code → Download ZIP**, rozbal ho a otevři složku se souborem `app.py`; případně použij `git clone https://github.com/jitesar/Cisco-Secure-Access.git`. Distribuční ZIP lze rozbalit do složky `csa-traffic`. Je potřeba Python 3.10+ a curl 7.75+ s podporou AWS SigV4.
-2. Na macOS otevři `Start.command`, ve Windows `start.cmd`. Spouštěč otevře lokální GUI v prohlížeči. Na Linuxu lze spustit `python3 app.py --open-browser`.
-3. Při prvním spuštění se automaticky otevře **Nastavení S3 / S3 settings**. Zadej S3 Data Path, AWS region, Access Key ID a Secret Access Key.
-4. Volitelně použij **Otestovat spojení**; tlačítko **Uložit a připojit** spojení znovu ověří, uloží nastavení a zahájí načtení logů.
+## Quick start
 
-Konfigurace v terminálu není potřeba. Formulář je kdykoliv dostupný v záhlaví a podporuje češtinu i angličtinu. Při zachování stejné S3 cesty a regionu lze ponechat obě pole klíčů prázdná a použít uloženou dvojici. Při změně cesty/regionu aplikace vyžaduje oba nové klíče. Běžné nastavení nevrací uložené hodnoty klíčů do prohlížeče; výjimkou je uživatelem vyžádaná záloha, při které se načtou do paměti prohlížeče a zašifrují.
+1. Download the repository using **Code → Download ZIP**, extract it, and open the folder containing `app.py`. Alternatively, clone it:
 
-Test ověřuje oprávnění vypsat obsah zadaného prefixu; samotné čtení logů se ověří při importu. Neúspěšný test nepřepíše fungující konfiguraci. Během importu se nastavení nemění. Pro jiný bucket, prefix nebo region je oddělená cache. Aplikace běží na http://127.0.0.1:8765 a poslouchá pouze lokálně; nejde o hostovanou víceuživatelskou službu.
+   ```sh
+   git clone https://github.com/jitesar/Cisco-Secure-Access.git
+   cd Cisco-Secure-Access
+   ```
 
-Volitelně lze dál použít terminál: `python3 app.py --setup` pro nastavení a `python3 app.py` pro běžné spuštění (ve Windows `python`). Pokud chybí curl nebo je příliš starý, test/import ohlásí chybu; existující cache zůstane čitelná.
+2. Start the application:
 
-## Trvalé nastavení a přístupové údaje
+   | Platform | Start command |
+   | --- | --- |
+   | macOS | Open `Start.command`, or run `python3 app.py --open-browser` |
+   | Windows | Open `start.cmd`, or run `python app.py --open-browser` |
+   | Linux | Run `python3 app.py --open-browser` |
 
-Aplikace automaticky čte `config.json` a jím odkazovaný soubor klíčů z uživatelské složky mimo distribuovaný projekt:
+3. Open [http://127.0.0.1:8765](http://127.0.0.1:8765) if the browser does not open automatically. Use the **Čeština / English** selector in the header to choose your language.
+4. On first launch, **S3 settings** opens automatically. Enter your S3 Data Path (`s3://bucket/customer-prefix/`), AWS region, Access Key ID and Secret Access Key. Use the credentials for your log storage.
+5. Optionally select **Test connection**, then **Save and connect**. Saving verifies access, stores the configuration locally and starts importing logs.
+6. Select a log source, traffic type, subnet or identity, and time interval to display the report.
 
-- macOS: `~/Library/Application Support/CSA Traffic/`
-- Windows: `%LOCALAPPDATA%\CSA Traffic\`
-- Linux: `$XDG_CONFIG_HOME/csa-traffic/`, jinak `~/.config/csa-traffic/`
+No terminal configuration is required. S3 settings remains available from the header. The server listens on `127.0.0.1` only and is intended for local use.
 
-`config.json` obsahuje `s3Path`, `region` a `credentialsFile`. Relativní cesta k přístupovým údajům se vyhodnocuje vůči umístění konfigurace. Soubor klíčů (`credentials.json` z původního nastavení nebo `credentials-<id>.json` vytvořený GUI) obsahuje `accessKeyId` a `secretAccessKey`. Klíče se zadávají skrytě a zapisují mimo projekt; na macOS/Linuxu mají soubory práva 600 a nadřazená složka 700. Jde o lokální soubory, nikoli šifrovaný trezor. Zálohuj je ve vlastním zabezpečeném zálohování.
+The connection test checks permission to list the configured S3 prefix. Reading individual log files is verified during import. A failed connection test leaves the working configuration unchanged. Settings cannot be changed during an import.
 
-Jiné umístění konfigurace lze určit přes `--config /cesta/config.json` nebo `CSA_CONFIG_FILE`. Samostatný soubor klíčů lze přepsat přepínačem `--credentials` nebo `CSA_CREDENTIALS_FILE`. Port mění `--port`. Žádná S3 organizace není v kódu napevno. Klíče nevstupují do prohlížeče ani cache, curl je dostává přes stdin. Vzory `config.example.json` a `credentials.example.json` obsahují pouze zástupné hodnoty.
+If you keep the same S3 path and region, leave both key fields blank to reuse the saved credentials. Changing the path or region requires both keys to be entered again. Regular settings responses do not return saved key values to the browser; explicitly requested backups do, so the browser can encrypt them.
 
-## Export aplikace
+## Reports and filters
+
+- Choose **Cloud Firewall** or **Web proxy** as the source.
+- Filter by all sources, IP addresses/subnets/ranges, or identity.
+- View received and sent bytes, average throughput over the entire interval, an hourly chart, the 20 most active IP addresses, and a CSV export of hourly values.
+- Select Internet, Private Access or unclassified firewall traffic, based on the `Private Flow` field. An empty value is unclassified. Web proxy provides a separate Internet traffic view.
+- Use a preset or a custom From–To interval within the last 30 days, ending no later than the current time. The GUI accepts minute-level boundaries.
+
+### IP filter examples
+
+| Input | Matches |
+| --- | --- |
+| `10.20.0.0/16` | An IPv4 subnet in CIDR notation |
+| `10.20.1.5` | One address |
+| `10.20.1.10-10.20.1.50` | An inclusive address range |
+| `10.20.1.5, 10.30.0.0/16` | A combination of addresses and subnets |
+| `2001:db8::/64` | An IPv6 subnet |
+
+Separate entries with commas, semicolons, spaces or newlines. Both range endpoints must use the same IP version. Ranges are compared without expanding them into individual addresses, and overlapping entries do not double-count traffic.
+
+Subnet filters match source IP addresses recorded in the logs. NAT may hide the original subnet. Text identity labels are preserved as a whole; JSON identity arrays are split into individual entries. The application does not currently retrieve AD/Entra group membership.
+
+### Measurement details
+
+Firewall and proxy totals are **kept separate** because they measure different layers and may represent the same traffic.
+
+| Log source | Counters |
+| --- | --- |
+| Cloud Firewall | `Bytes Sent` and `Bytes Received` |
+| Web proxy | `Request Size` and `Response Size` |
+
+`Response Body Size` is not added again. Missing counters are reported rather than treated as verified zero traffic. Units are decimal: 1 GB = 10^9 bytes.
+
+Each record is assigned to the half-open interval `[from, to)` and an hourly bucket using its log timestamp. Bytes from a long-running session are not distributed across the duration of that session, so the chart does not necessarily represent instantaneous link utilization.
+
+The form and displayed times use `Europe/Prague`; internal filters use UTC. During the autumn daylight-saving transition, local hours repeat. For this version, choose interval boundaries outside the repeated hour.
+
+## History, import and limitations
+
+The available-history panel shows the first and last cached record for the selected source and warns if the selected interval starts before the available history. Selecting 3, 7 or 30 days changes the reporting interval; it does not create older logs. Enabling S3 export today does not automatically provide a week of historical data.
+
+After the initial connection or configuration restore, refresh data manually using the synchronization button. The importer:
+
+- Lists the last 31 UTC date directories under `firewalllogs` and `proxylogs`, including paginated S3 results.
+- Imports complete files and tracks each file by S3 key and ETag to avoid duplicate rows.
+- Atomically replaces a file's old rows if its ETag changes.
+- Keeps successfully imported files if another file fails, and reports an incomplete import.
+- Deletes records older than 31 days after a successful import.
+
+Supported formats include CSV with named headers and headerless v10/v17 files with exactly 34/40 firewall columns or 49/57 proxy columns. Mixed versions during a schema upgrade are supported. Other headerless layouts are rejected to avoid interpreting the wrong columns as byte counters.
+
+A file may be up to 150 MB compressed. This version keeps a parsed file and the selected report in memory; large deployments require streaming and more scalable storage. Late events placed in directories outside the imported date window may be missed. The first and last record timestamps do not prove complete coverage. S3 contents are never modified.
+
+## Configuration and credential storage
+
+The application reads `config.json` and its referenced credentials file from a user-specific directory outside the project:
+
+| Platform | Default directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/CSA Traffic/` |
+| Windows | `%LOCALAPPDATA%\CSA Traffic\` |
+| Linux | `$XDG_CONFIG_HOME/csa-traffic/`, or `~/.config/csa-traffic/` |
+
+`config.json` contains `s3Path`, `region` and `credentialsFile`. Relative credential paths are resolved against the configuration file's directory. The credentials file contains `accessKeyId` and `secretAccessKey`; it may be named `credentials.json` by the original setup or `credentials-<id>.json` by the GUI.
+
+Key fields mask entered values. Files are stored outside the project, with mode `600` for files and `700` for the containing directory on macOS/Linux. These local JSON files are not an encrypted vault. Use encrypted configuration backups for portable copies, or your own secure backup system.
+
+The SQLite cache is stored at `cache/<connection-fingerprint>/traffic.sqlite` within the configuration directory. It is separate for each bucket, prefix and region, and contains actual IP addresses and identities. Keep it out of shared packages. Removing it causes logs to be downloaded again on the next import.
+
+No customer S3 organization or credentials are hardcoded. The files [config.example.json](config.example.json) and [credentials.example.json](credentials.example.json) contain placeholders only. Credentials are passed to curl through standard input and are not stored in the traffic cache.
+
+### Optional command-line configuration
+
+```sh
+python3 app.py --setup
+python3 app.py
+```
+
+On Windows, use `python` instead of `python3`.
+
+| Option / environment variable | Purpose |
+| --- | --- |
+| `--config /path/config.json` / `CSA_CONFIG_FILE` | Override the configuration file location |
+| `--credentials /path/credentials.json` / `CSA_CREDENTIALS_FILE` | Override the credentials file location |
+| `--port` | Change the local HTTP port |
+| `--open-browser` | Open the GUI when the server starts |
+
+If curl is missing or too old, connection testing/import reports an error; existing cached data remains readable.
+
+### Local API protections
+
+Settings writes require a localhost Host header, an exact matching Origin and a CSRF token generated for the current server run. Settings JSON requests have a size limit. Testing does not persist credentials. Saving writes a new credentials file and atomically switches the configuration; a write failure preserves the previous configuration.
+
+Replaced credentials files managed by the application are removed after a successful switch. If you back up local files directly, include the entire configuration directory rather than assuming the active file is always named `credentials.json`.
+
+## Encrypted configuration backup and restore
+
+### Create a backup
+
+1. Open **S3 settings → Back up and restore configuration**.
+2. Enter a password of at least 12 characters and repeat it.
+3. Select **Download encrypted backup** to download a `.csabackup` file.
+
+The backup contains the saved S3 path, region, both current access keys and the selected language. It excludes logs, cache, database contents and machine-specific absolute paths. Unsaved settings form edits are not included. Keep the password separately; the backup cannot be recovered without it.
+
+### Restore on another computer
+
+1. Download and start the application on the other computer.
+2. Open the same backup panel, select the `.csabackup` file and enter its password.
+3. Select **Restore and connect**.
+
+Restore also works on a fresh installation without a saved connection. The application verifies S3 access before replacing the current configuration. An incorrect password, damaged file or failed connection check leaves the existing settings unchanged. Logs are imported again after a successful restore.
+
+Restoring a backup does not renew or reactivate S3 keys. If they have expired or been rotated, supply the current credentials.
+
+### Backup format
+
+Encryption runs in the browser using Web Crypto: AES-256-GCM, a random 16-byte salt, a 12-byte IV, a 128-bit authentication tag and PBKDF2-SHA256 with 600,000 iterations. Format v1 accepts only these parameters.
+
+The password is neither sent to the server nor stored. During an explicit backup request, credentials are retrieved into browser memory through a protected POST request and encrypted before download. Credentials are not saved to localStorage; the downloaded backup contains them only in encrypted form.
+
+## Language and appearance
+
+The dark GUI supports Czech and English through the header selector. The choice is saved in browser localStorage and synchronized between open application tabs. Switching languages preserves the current filters and interval.
+
+Labels, charts, dynamic statistics, known error messages, empty states, measurement notes and CSV headers are localized. Numbers and application date labels follow the selected language; the time zone remains `Europe/Prague`. Native date controls may follow the browser or operating system language. Identity names, technical log field names and S3 error codes remain unchanged.
+
+## Create a distributable ZIP
 
 ```sh
 python3 export_app.py --output csa-traffic.zip
 ```
 
-Export používá pevný seznam zdrojových souborů. Přibalí aplikaci, statické soubory, testy, průvodce nastavením, spouštěče a vzory konfigurace. Nezahrnuje skutečnou konfiguraci, klíče, databázi, screenshoty ani historii logů. ZIP můžeš předat dalšímu uživateli; vlastní S3 připojí v GUI bez terminálové konfigurace.
+The export uses an explicit source-file allowlist. It includes the application, static assets, tests, launchers, documentation and example configuration. Actual configuration, credentials, databases, screenshots and log history are excluded. Share the ZIP with another user, who can configure their own S3 connection in the GUI.
 
-## Ovládání a měření
+To move your own connection to another computer, transfer a separate encrypted `.csabackup` file and keep its password separate.
 
-- Výběr Cloud Firewall nebo Web proxy, všech zdrojů / IP/CIDR/rozsahu nebo výčtu IPv4 či IPv6 / identity a intervalu v rámci posledních 30 dní.
-- Součty přijatých a odeslaných bajtů, průměrná rychlost za celý interval, hodinový graf, 20 nejaktivnějších IP a CSV hodinových hodnot. Jednotky jsou desetinné (GB = 10^9 B).
-- Internet / Private Access / nerozlišený provoz podle `Private Flow`. Prázdná hodnota není považována za Internet. Web proxy je samostatná internetová statistika.
-- Firewall a proxy se **nesčítají**. Mají rozdílnou úroveň měření a mohou zachytit stejný provoz.
-- Firewall: `Bytes Sent` / `Bytes Received`. Proxy: `Request Size` / `Response Size`; `Response Body Size` se podruhé nepřičítá. Chybějící počítadla se hlásí, nejde o ověřené nulové přenosy.
-- Filtr subnetu pracuje s IP v logu; NAT může skutečný subnet skrýt. Textové identity se zachovávají jako celek, JSON pole identit se rozloží na jednotlivé položky. Skupinové členství AD/Entra zatím aplikace nezískává.
-- Timestamp určuje přiřazení do intervalu `[od, do)` a hodinového koše. Bajty dlouhé relace se nerozdělují podle průběhu relace. Graf nemusí odpovídat skutečnému okamžitému vytížení linky.
-- Formulář a popisky používají Europe/Prague, interní filtry UTC. Při podzimní změně času jsou místní hodiny opakované; pro tuto první verzi je vhodné vybrat hranice intervalu mimo opakovanou hodinu.
+## Development checks
 
-Podporované formáty: CSV s pojmenovanými hlavičkami a v10/v17 bez hlavičky s přesně 34/40 firewall nebo 49/57 proxy sloupci, včetně smíšených souborů při upgradu. Jiné formáty bez hlavičky import odmítne, aby neposunul počítadla na nesprávné sloupce.
-
-## Import a omezení
-
-Ručně spouštěný import seznamuje posledních 31 UTC adresářů v `firewalllogs` a `proxylogs`, stránkuje S3 výsledky a importuje celé soubory. Opakované načtení nezduplikuje řádky: soubor je evidován podle klíče a ETag. Změněný soubor atomicky nahrazuje staré řádky. Při chybě zůstávají úspěšně načtené soubory v cache a dashboard hlásí neúplný import. Záznamy starší než 31 dní se po úspěšném importu mažou.
-
-Cache je v uživatelské složce `cache/<otisk-pripojeni>/traffic.sqlite` mimo projekt a obsahuje skutečné IP a identity. Pro každý bucket, prefix a region je oddělená. Nevkládej ji do sdílených podkladů. Při smazání cache se data znovu stáhnou. S3 obsah se nemění. Jednotlivý soubor může mít nejvýše 150 MB komprimovaně; velké instalace vyžadují streamování a škálovatelnější úložiště. Tato verze drží parsovaný soubor a vybraný report v paměti. Rozsah záznamů není důkazem kompletního pokrytí. Export zapnutý dnes neposkytuje automaticky týden zpětné historie; pozdní události v adresářích mimo importované období nejsou zachyceny.
-
-## Ověření
+Run from the repository root:
 
 ```sh
 python3 -m unittest discover -s tests -v
 node --check static/app.js
+node tests/test_backup.js
 ```
 
-## IP filtr a historie
-
-Podporované příklady: `10.20.0.0/16`, `10.20.1.5`, `10.20.1.10-10.20.1.50`, nebo jejich kombinace oddělená čárkami, středníky, mezerami či novými řádky. Oba konce rozsahu jsou zahrnuté a musí patřit stejné rodině IP. Rozsahy se nepřevádějí na seznam jednotlivých adres; překryvy filtrů nezduplikují provoz.
-
-Interval Od–Do musí celý ležet v posledních 30 dnech, maximálně do aktuálního času. Přesnost hranic formuláře je na minuty. Presety 3/7/30 dní mění období, nevytvářejí starší logy. Zvýrazněný panel ukazuje skutečný první a poslední záznam v cache vybraného zdroje a upozorní, pokud zvolený interval začíná před dostupnou historií. Data se doplňují ruční synchronizací.
-
-## Jazyk a vzhled
-
-Tmavé GUI obsahuje v záhlaví přepínač Čeština / English. Volba se ukládá do localStorage prohlížeče a synchronizuje mezi otevřenými kartami aplikace. Přepnutí zachová aktuální filtry a interval. Překládají se popisky, graf, dynamické statistiky, známé chybové zprávy, prázdné stavy, popis měření a hlavičky CSV. Čísla a aplikační datumové popisky odpovídají zvolenému jazyku; časové pásmo zůstává Europe/Prague. Nativní datumový ovladač může používat lokalizaci prohlížeče či operačního systému. Názvy skutečných identit, technických polí logů a kódy chyb S3 se nemění.
-
-GUI API chrání zápisy kontrolou localhost Host, přesného Origin a tokenem CSRF pro daný běh serveru. JSON požadavky nastavení mají omezenou velikost. Test nezapisuje klíče; uložení používá nový soubor klíčů a atomické přepnutí konfigurace. Při chybě zápisu zůstává původní konfigurace platná. Nahrazené soubory klíčů spravované aplikací se po úspěšném přepnutí odstraňují; při zálohování zahrň celou uživatelskou složku, ne jen pevný název credentials.json.
-
-## Šifrovaná záloha a přenos na jiný počítač
-
-V **Nastavení S3 → Záloha a obnova konfigurace** zadej heslo dlouhé alespoň 12 znaků, zopakuj jej a stáhni soubor `.csabackup`. Obsahuje S3 cestu, region, oba aktuální přístupové klíče a zvolený jazyk. Neobsahuje logy, cache, absolutní cesty ani databázi. Zálohuje se uložená konfigurace, nikoliv rozepsaný formulář.
-
-Na jiném počítači spusť aplikaci a v témže panelu vyber soubor, zadej heslo a použij **Obnovit a připojit**. Funguje to i při prvním spuštění bez nastavení. Před zápisem aplikace ověří přístup k S3; neplatné heslo, poškozený soubor nebo neúspěšné ověření zachová původní nastavení. Po obnově se logy znovu načtou. Záloha neprodlužuje platnost S3 klíčů: pokud mezitím expirovaly nebo byly zneplatněny rotací, použij aktuální klíče.
-
-Šifrování probíhá v prohlížeči pomocí Web Crypto: AES-256-GCM, náhodná 16bajtová sůl, 12bajtový IV, 128bitový autentizační tag a PBKDF2-SHA256 s 600 000 iteracemi. Formát v1 přijímá pouze tyto parametry. Heslo se neposílá serveru ani neukládá. Klíče se při explicitním exportu načtou přes chráněný POST do paměti prohlížeče; neukládají se do localStorage a do staženého souboru vstupují pouze šifrovaně. Bez hesla nelze zálohu obnovit; heslo uchovej odděleně v bezpečném úložišti.
-
-Kryptografické a formátové kontroly lze spustit příkazem `node tests/test_backup.js` (Node 18+ je potřeba jen pro tyto vývojářské testy, nikoliv pro běh aplikace).
+Node.js 18+ is needed only for the developer checks, not to run the application. The backup tests cover encryption/decryption, incorrect passwords, tampering, format validation and fresh randomness.
