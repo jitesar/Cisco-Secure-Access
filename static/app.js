@@ -16,7 +16,7 @@ function error(message){activeError=message;const rendered=message&&typeof messa
 function params(){const from=pragueDate($('#from').value),to=pragueDate($('#to').value);if(!(to>from)||to-from>30*86400000)throw Error('rangeError');const now=new Date();now.setSeconds(0,0);if(from<new Date(now-30*86400000)||to>new Date())throw Error('windowError');const mode=$('#mode').value;if(mode==='subnet'&&!$('#subnet').value.trim())throw Error('ipRequired');if(mode==='identity'&&!$('#identity').value)throw Error('identityRequired');return new URLSearchParams({source,scope:$('#scope').value,from:from.toISOString(),to:to.toISOString(),subnet:mode==='subnet'?$('#subnet').value.trim():'',identity:mode==='identity'?$('#identity').value:''})}
 async function load(){if(!connection.configured)return;closeTransfers();const request=++requestNo;loading=true;updateExportButtons();$('.apply').disabled=true;try{error('');updateDateBounds();const query=params();const data=await api('/api/report?'+query);if(request!==requestNo)return;current={...data,query};render()}catch(e){if(request===requestNo)error(e.message)}finally{if(request===requestNo){loading=false;updateExportButtons();$('.apply').disabled=false}}}
 function render(){const d=current,totals=d.totals,total=totals.sent+totals.received;$('#total').textContent=bytes(total);$('#received').textContent=bytes(totals.received);$('#sent').textContent=bytes(totals.sent);$('#recordcount').textContent=t('recordCount',{n:fmt.format(totals.records)});const seconds=(new Date(d.query.get('to'))-new Date(d.query.get('from')))/1000;$('#rate').textContent=rate(total*8/seconds);$('#rxhint').textContent=source==='proxy'?'Response Size':'Bytes Received';$('#txhint').textContent=source==='proxy'?'Request Size':'Bytes Sent';
-const selected=$('#identity').value;$('#identity').replaceChildren(new Option(t('chooseIdentity'),''),...d.identities.map(x=>new Option(x,x)));$('#identity').value=selected;
+const selected=$('#identity').value;$('#identity').replaceChildren(new Option(t('chooseIdentity'),''),...[...new Set([...d.identities,...(selected?[selected]:[])])].map(x=>new Option(x,x)));$('#identity').value=selected;
 let note=t('notice');if(totals.unknown)note+=' '+t('unknownNote',{n:fmt.format(totals.unknown)});if(totals.missing)note+=' '+t('missingNote',{n:fmt.format(totals.missing)});$('#notice').textContent=note;
 renderHistory(d);$('#empty').hidden=totals.records!==0;$('#chartcaption').textContent=timefmt.format(new Date(d.query.get('from')))+' — '+timefmt.format(new Date(d.query.get('to')))+' · '+t('hourly');
 renderTop();
@@ -88,9 +88,9 @@ function applyLanguage(next,persist=true){
   document.querySelectorAll('[data-i18n-aria]').forEach(node=>node.setAttribute('aria-label',t(node.dataset.i18nAria)));
   document.querySelectorAll('[data-lang]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.lang===language)));
   $('#sourcedesc').textContent=t(source==='proxy'?'sourceProxy':'sourceFirewall');$('#tooltip').hidden=true;
-  if(current)render();renderStatus(lastStatus);error(activeError);localizeSettings();renderTransfers();
+  if(current)render();renderStatus(lastStatus);error(activeError);localizeSettings();renderTransfers();renderSavedFilters();
   if(persist){try{localStorage.setItem('csa-language',language)}catch(_){}}
 }
 for(const button of document.querySelectorAll('[data-lang]'))button.addEventListener('click',()=>applyLanguage(button.dataset.lang));
 window.addEventListener('storage',event=>{if(event.key==='csa-language')applyLanguage(event.newValue,false)});
-initializeTransfers();applyLanguage(language,false);preset(24);initializeConnection();setInterval(status,2500);
+initializeTransfers();initializeSavedFilters();applyLanguage(language,false);preset(24);initializeConnection();setInterval(status,2500);

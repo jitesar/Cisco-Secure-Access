@@ -222,7 +222,14 @@ Run from the repository root:
 python3 -m unittest discover -s tests -v
 node --check static/app.js
 node tests/test_backup.js
+node tests/test_filters.js
 node tests/test_exports.js
 ```
 
 Node.js 18+ is needed only for the developer checks, not to run the application. The backup tests cover encryption/decryption, incorrect passwords, tampering, format validation and fresh randomness.
+
+### Saved search filters
+
+Name the current filter and select **Save / update**. Saved filters include the measurement source, address or identity filter, traffic type and time selection. Select one and choose **Apply filter** to run it, or **Delete** to remove it. Saving under the same name replaces that filter (up to 100 saved filters).
+
+Quick periods such as **24 hours** are recalculated relative to the current time when applied. Custom From–To intervals keep their original dates; if they fall outside the last 30 days, adjust the interval before running the search. Filters persist in this browser's local storage for the application URL. They are not included in configuration backups or the application ZIP, and clearing browser site data removes them.

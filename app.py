@@ -873,7 +873,7 @@ class Handler(BaseHTTPRequestHandler):
                 if url.path == '/api/transfers' and 'event' in params and params.get('hydrate') == '1' and not data['available']:
                     data = hydrate_transfer(params, database)
                 return self.send(200, data)
-            files = {'/transfers.js': ('transfers.js', 'text/javascript; charset=utf-8'), '/exports.js': ('exports.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/settings.js': ('settings.js', 'text/javascript; charset=utf-8'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/i18n.js': ('i18n.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
+            files = {'/filters.js': ('filters.js', 'text/javascript; charset=utf-8'), '/transfers.js': ('transfers.js', 'text/javascript; charset=utf-8'), '/exports.js': ('exports.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/settings.js': ('settings.js', 'text/javascript; charset=utf-8'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/i18n.js': ('i18n.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if url.path not in files:
                 return self.send(404, {'error': 'Nenalezeno'})
             name, mime = files[url.path]

@@ -31,3 +31,5 @@ fieldset{border:0;padding:0;margin:0;min-width:0}#filtercontrols{width:100%}fiel
 .transfer-sort-header{display:inline-flex;align-items:center;gap:9px;border:0;background:transparent;color:inherit;font:inherit;text-align:inherit;padding:6px 0;white-space:normal;line-height:1.5}.transfer-sort-header:hover,.transfer-sort-header.active{color:#83ead2}.sort-indicator{color:#6d879f;font-size:13px;min-width:12px}.transfer-sort-header.active .sort-indicator{color:#83ead2}.transfers-table th{padding-top:6px;padding-bottom:6px}.transfers-table th:nth-child(n+5) .transfer-sort-header{justify-content:flex-end}
 
 .top-table th{padding-top:6px;padding-bottom:6px}.top-table th:not(:first-child) .transfer-sort-header{justify-content:flex-end}
+
+.saved-filters{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;border-top:1px solid #2c4156;margin-top:20px;padding-top:18px}.saved-filters label{flex:1;min-width:180px}.saved-filters button{min-height:42px}.saved-filter-hint{color:var(--muted);font-size:11px;line-height:1.7;margin:10px 0 0}#saved-filter-message:empty{display:none}

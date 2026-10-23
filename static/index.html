@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1220"><title>CSA · Přenosy dat</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/backup.js" defer></script><script src="/settings.js" defer></script><script src="/exports.js" defer></script><script src="/transfers.js" defer></script><script src="/app.js" defer></script></head>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1220"><title>CSA · Přenosy dat</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/backup.js" defer></script><script src="/settings.js" defer></script><script src="/exports.js" defer></script><script src="/transfers.js" defer></script><script src="/filters.js" defer></script><script src="/app.js" defer></script></head>
 <body>
 <header><a class="brand" href="/">▥ <span>CSA<span class="brandlight"> / Traffic</span></span></a><div class="header-tools"><button type="button" id="open-settings" class="secondary" data-i18n="settingsButton">Nastavení S3</button><span class="local"><i></i><span data-i18n="local">Lokální aplikace · S3</span></span><div class="languages" role="group" aria-label="Jazyk / Language"><button type="button" data-lang="cs" lang="cs" aria-pressed="true">Čeština</button><button type="button" data-lang="en" lang="en" aria-pressed="false">English</button></div></div></header>
 <main>
@@ -14,6 +14,15 @@
 <label><span data-i18n="trafficType">Druh provozu</span><select id="scope"><option value="all" data-i18n="allTraffic">Veškerý zaznamenaný</option><option value="internet" data-i18n="internet">Internet · potvrzený</option><option value="private" data-i18n="private">Private Access · potvrzený</option><option value="unknown" data-i18n="unknownTraffic">Nerozlišený provoz</option></select></label>
 <label><span data-i18n="from">Od</span><input type="datetime-local" id="from" required></label><label><span data-i18n="to">Do</span><input type="datetime-local" id="to" required></label><button type="submit" class="primary apply" data-i18n="showTraffic">Zobrazit přenosy →</button></div>
 <div class="presets"><span data-i18n="quickSelect">Rychlý výběr</span><button type="button" data-hours="1" data-i18n="hour1">1 hodina</button><button type="button" data-hours="24" class="selected" data-i18n="hours24">24 hodin</button><button type="button" data-hours="72" data-i18n="days3">3 dny</button><button type="button" data-hours="168" data-i18n="days7">7 dní</button><button type="button" data-hours="720" data-i18n="days30">30 dní</button><span class="timezone" data-i18n="timezone">Časy: Europe/Prague</span></div>
+<div class="saved-filters">
+<label><span data-i18n="savedFiltersTitle">Uložené filtry</span><select id="saved-filter-select"><option value="" data-i18n="savedFilterChoose">Vyber uložený filtr</option></select></label>
+<button type="button" id="saved-filter-load" class="secondary" disabled data-i18n="savedFilterLoad">Použít filtr</button>
+<button type="button" id="saved-filter-delete" class="secondary" disabled data-i18n="savedFilterDelete">Smazat</button>
+<label><span data-i18n="savedFilterName">Název filtru</span><input type="text" id="saved-filter-name" maxlength="80" autocomplete="off"></label>
+<button type="button" id="saved-filter-save" class="secondary" data-i18n="savedFilterSave">Uložit / aktualizovat</button>
+</div>
+<p class="saved-filter-hint" data-i18n="savedFilterHint">Filtry se ukládají v tomto prohlížeči. Stejný název přepíše filtr. Rychlá období se počítají od aktuálního času, vlastní interval zůstává pevný.</p>
+<p id="saved-filter-message" class="saved-filter-hint" role="status" aria-live="polite"></p>
 </fieldset></form>
 <p class="intervalhint" data-i18n="intervalHint">Vlastní interval nastav v polích Od a Do, kdekoliv v posledních 30 dnech.</p>
 <div class="historybox" id="historybox" aria-live="polite"><strong id="historyinfo" data-i18n="checkingHistory">Ověřuji dostupnou historii…</strong><p id="historydetail"></p></div>
