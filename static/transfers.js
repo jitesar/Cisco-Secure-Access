@@ -41,8 +41,6 @@ function renderTransfers(){
   const q=state.query, data=state.data;
   $('#transfers-title').textContent=t('transferTitle',{ip:state.ip||t('unknownIP')});
   $('#transfers-context').textContent=t(q.get('source')==='proxy'?'proxy':'firewall')+' · '+transferTime(new Date(q.get('from')).getTime()/1000)+' - '+transferTime(new Date(q.get('to')).getTime()/1000)+' · Europe/Prague\n'+t('trafficType')+': '+t(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])+(q.get('subnet')?' · '+t('csvIP')+': '+q.get('subnet'):'')+(q.get('identity')?' · '+t('identity')+': '+q.get('identity'):'');
-  $('#transfers-sort').value=state.sort;$('#transfers-sort').disabled=state.busy;
-  $('#transfers-direction').disabled=state.busy;$('#transfers-direction').textContent=t(state.direction==='asc'?'transferAscending':'transferDescending')+(state.direction==='asc'?' ↑':' ↓');
   for(const button of document.querySelectorAll('[data-transfer-sort]')){
     const active=button.dataset.transferSort===state.sort, next=active?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(button.dataset.transferSort);
     button.disabled=state.busy;button.classList.toggle('active',active);button.closest('th').setAttribute('aria-sort',active?(state.direction==='asc'?'ascending':'descending'):'none');
@@ -85,16 +83,14 @@ function renderTransfers(){
 }
 
 function defaultTransferDirection(key){return ['time','received','sent','total'].includes(key)?'desc':'asc'}
-function changeTransferSort(key,toggle=true){
+function changeTransferSort(key){
   const state=transferState;if(!state||state.busy)return;
-  state.direction=toggle&&state.sort===key?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(key);
+  state.direction=state.sort===key?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(key);
   state.sort=key;state.page=1;fetchTransfers();
 }
 function initializeTransfers(){
 $('#transfers-close').addEventListener('click',closeTransfers);
 $('#transfers-dialog').addEventListener('close',()=>{transferState=null});
-$('#transfers-sort').addEventListener('change',()=>changeTransferSort($('#transfers-sort').value,false));
-$('#transfers-direction').addEventListener('click',()=>{if(transferState)changeTransferSort(transferState.sort)});
 for(const button of document.querySelectorAll('[data-transfer-sort]'))button.addEventListener('click',()=>changeTransferSort(button.dataset.transferSort));
 $('#transfers-refresh-sort').addEventListener('click',()=>{if(transferState){transferState.page=1;fetchTransfers()}});
 $('#transfers-previous').addEventListener('click',()=>{if(transferState){transferState.page--;fetchTransfers()}});
