@@ -180,7 +180,7 @@ Replaced credentials files managed by the application are removed after a succes
 2. Enter a password of at least 12 characters and repeat it.
 3. Select **Download encrypted backup** to download a `.csabackup` file.
 
-The backup contains the saved S3 path, region, both current access keys, the selected language and the display time zone. It excludes logs, cache, database contents and machine-specific absolute paths. Unsaved settings form edits are not included. Keep the password separately; the backup cannot be recovered without it.
+The backup contains the saved S3 path, region, both current access keys, the selected language, display time zone and saved search filters from this browser. It excludes logs, cache, database contents and machine-specific absolute paths. Unsaved settings form edits are not included. Keep the password separately; the backup cannot be recovered without it.
 
 ### Restore on another computer
 
@@ -188,13 +188,13 @@ The backup contains the saved S3 path, region, both current access keys, the sel
 2. Open the same backup panel, select the `.csabackup` file and enter its password.
 3. Select **Restore and connect**.
 
-Restore also works on a fresh installation without a saved connection. The application verifies S3 access before replacing the current configuration. An incorrect password, damaged file or failed connection check leaves the existing settings unchanged. Logs are imported again after a successful restore.
+Restore also works on a fresh installation without a saved connection. The application verifies S3 access before replacing the current configuration. An incorrect password, damaged file or failed connection check leaves the existing settings unchanged. Saved filters are merged with those in the target browser; filters from the backup replace existing filters with the same name. Other local filters remain. Older backups without saved filters leave local filters unchanged. A merge exceeding 100 filters, an invalid filter or insufficient browser storage is rejected before changing the S3 connection. If the S3 restore fails, the staged filter import is rolled back. Logs are imported again after a successful restore.
 
 Restoring a backup does not renew or reactivate S3 keys. If they have expired or been rotated, supply the current credentials.
 
 ### Backup format
 
-Encryption runs in the browser using Web Crypto: AES-256-GCM, a random 16-byte salt, a 12-byte IV, a 128-bit authentication tag and PBKDF2-SHA256 with 600,000 iterations. Format v1 accepts only these parameters.
+Encryption runs in the browser using Web Crypto: AES-256-GCM, a random 16-byte salt, a 12-byte IV, a 128-bit authentication tag and PBKDF2-SHA256 with 600,000 iterations. Format v1 accepts only these parameters and remains compatible with older backups without saved filters. The decrypted payload is limited to 16 MiB and the encrypted file to 24 MiB.
 
 The password is neither sent to the server nor stored. During an explicit backup request, credentials are retrieved into browser memory through a protected POST request and encrypted before download. Credentials are not saved to localStorage; the downloaded backup contains them only in encrypted form.
 
@@ -233,4 +233,4 @@ Node.js 18+ is needed only for the developer checks, not to run the application.
 
 Name the current filter and select **Save / update**. Saved filters include the measurement source, address or identity filter, traffic type and time selection. Select one and choose **Apply filter** to run it, or **Delete** to remove it. Saving under the same name replaces that filter (up to 100 saved filters).
 
-Quick periods such as **24 hours** are recalculated relative to the current time when applied. Custom From–To intervals keep their original dates; if they fall outside the last 30 days, adjust the interval before running the search. Filters persist in this browser's local storage for the application URL. They are not included in configuration backups or the application ZIP, and clearing browser site data removes them.
+Quick periods such as **24 hours** are recalculated relative to the current time when applied. Custom From–To intervals keep their original dates; if they fall outside the last 30 days, adjust the interval before running the search. Filters persist in this browser's local storage for the application URL. They are included in encrypted configuration backups, so they can be restored on another computer, but are excluded from the application ZIP. Clearing browser site data removes the local copies. Saved custom intervals retain their original UTC instants; relative periods are recalculated when applied.

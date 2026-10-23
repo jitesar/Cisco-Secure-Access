@@ -2,11 +2,12 @@
 const BACKUP_FORMAT='csa-traffic-encrypted-backup';
 const BACKUP_ITERATIONS=600000;
 const BACKUP_AAD=new TextEncoder().encode('CSA Traffic encrypted backup v1');
-const MAX_BACKUP_BYTES=131072;
+const MAX_BACKUP_PLAINTEXT=16*1024*1024;
+const MAX_BACKUP_BYTES=24*1024*1024;
 
 function base64(bytes){return btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''))}
-function unbase64(value){
-  if(typeof value!=='string'||value.length>90000||value.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(value))throw Error('backupInvalid');
+function unbase64(value,maxBytes){
+  if(typeof value!=='string'||value.length>4*Math.ceil(maxBytes/3)||value.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(value))throw Error('backupInvalid');
   try{return Uint8Array.from(atob(value),c=>c.charCodeAt(0))}catch(_){throw Error('backupInvalid')}
 }
 function requireBackupCrypto(){if(!globalThis.crypto?.subtle)throw Error('backupCryptoUnavailable')}
@@ -24,7 +25,7 @@ async function encryptBackup(snapshot,password){
   const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
   const bytes=new TextEncoder().encode(JSON.stringify(snapshot));
   try{
-    if(bytes.length>16000)throw Error('backupInvalid');
+    if(bytes.length>MAX_BACKUP_PLAINTEXT)throw Error('backupTooLarge');
     const key=await backupKey(password,salt);
     const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:BACKUP_AAD,tagLength:128},key,bytes);
     return {format:BACKUP_FORMAT,version:1,cipher:'AES-256-GCM',kdf:'PBKDF2-SHA256',iterations:BACKUP_ITERATIONS,salt:base64(salt),iv:base64(iv),ciphertext:base64(new Uint8Array(ciphertext))};
@@ -36,14 +37,15 @@ async function decryptBackup(text,password){
   let envelope;
   try{envelope=JSON.parse(text)}catch(_){throw Error('backupInvalid')}
   if(!envelope||envelope.format!==BACKUP_FORMAT||envelope.version!==1||envelope.cipher!=='AES-256-GCM'||envelope.kdf!=='PBKDF2-SHA256'||envelope.iterations!==BACKUP_ITERATIONS)throw Error('backupInvalid');
-  const salt=unbase64(envelope.salt),iv=unbase64(envelope.iv),ciphertext=unbase64(envelope.ciphertext);
-  if(salt.length!==16||iv.length!==12||ciphertext.length<16||ciphertext.length>16016)throw Error('backupInvalid');
+  const salt=unbase64(envelope.salt,16),iv=unbase64(envelope.iv,12),ciphertext=unbase64(envelope.ciphertext,MAX_BACKUP_PLAINTEXT+16);
+  if(salt.length!==16||iv.length!==12||ciphertext.length<16||ciphertext.length>MAX_BACKUP_PLAINTEXT+16)throw Error('backupInvalid');
   const key=await backupKey(password,salt);
   let plaintext;
   try{plaintext=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:BACKUP_AAD,tagLength:128},key,ciphertext))}catch(_){throw Error('backupDecryptFailed')}
   try{
     const snapshot=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plaintext));
     if(!snapshot||snapshot.format!=='csa-traffic-settings'||snapshot.version!==1||!snapshot.settings||!snapshot.credentials)throw Error();
+    if(Object.prototype.hasOwnProperty.call(snapshot,'savedFilters'))validateSavedFilters(snapshot.savedFilters);
     return snapshot;
   }catch(_){throw Error('backupInvalid')}finally{plaintext.fill(0)}
 }
@@ -76,6 +78,7 @@ async function exportBackup(){
     requireBackupCrypto();
     snapshot=await api('/api/settings/backup',{method:'POST',body:'{}'});
     snapshot.preferences={language,timeZone};
+    snapshot.savedFilters=readSavedFilters();
     const encrypted=await encryptBackup(snapshot,$('#backup-password').value);
     const url=URL.createObjectURL(new Blob([JSON.stringify(encrypted,null,2)+'\n'],{type:'application/json'}));
     const link=document.createElement('a');link.href=url;link.download='csa-traffic-'+wallValue(new Date()).slice(0,10)+'.csabackup';link.click();
@@ -92,15 +95,21 @@ async function importBackup(){
   const file=$('#restore-file').files[0];
   if(!file||file.size>MAX_BACKUP_BYTES){backupFeedback('backupInvalid','failure');return}
   setSettingsBusy(true);backupFeedback('backupRestoring','pending');
-  let snapshot=null;
+  let snapshot=null,filterTransaction=null;
   try{
     snapshot=await decryptBackup(await file.text(),$('#restore-password').value);
-    const result=await api('/api/settings/restore',{method:'POST',body:JSON.stringify(snapshot)});
+    // Check and persist browser storage before changing the S3 connection. Roll
+    // this write back if S3 validation fails. Filter data stays in the browser.
+    filterTransaction=stageSavedFilterRestore(snapshot);
+    const configuration={format:snapshot.format,version:snapshot.version,settings:snapshot.settings,credentials:snapshot.credentials,preferences:{language:snapshot.preferences?.language}};
+    const result=await api('/api/settings/restore',{method:'POST',body:JSON.stringify(configuration)});
+    const completed=filterTransaction;filterTransaction=null;finishSavedFilterRestore(completed);
     if(validTimeZone(snapshot.preferences?.timeZone))applyTimeZone(snapshot.preferences.timeZone);
     if(result.language)applyLanguage(result.language);
     await finishConnection(result,'backupRestored');
     $('#restore-file').value='';
   }catch(e){
+    try{rollbackSavedFilterRestore(filterTransaction)}catch(_){e=new Error('backupFilterRollbackFailed')}
     if($('#settings-dialog').open)backupFeedback(e.message,'failure',true);
     else error(e.message);
   }finally{

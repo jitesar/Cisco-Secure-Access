@@ -50,7 +50,7 @@
   </form>
   <details id="backup-panel" class="backup-panel">
     <summary data-i18n="backupTitle">Záloha a obnova konfigurace</summary>
-    <p class="settings-hint" data-i18n="backupIntro">Přenes S3 cestu, region, přístupové klíče a jazyk v souboru šifrovaném heslem. Logy se nezálohují.</p>
+    <p class="settings-hint" data-i18n="backupIntro">Přenes S3 cestu, region, přístupové klíče, jazyk, časovou zónu a uložené filtry v souboru šifrovaném heslem. Logy se nezálohují.</p>
     <p id="backup-setuphint" class="settings-hint" data-i18n="backupSetupHint">Nemáš ještě připojení? Existující zálohu můžeš obnovit níže.</p>
     <form id="backup-export-form" autocomplete="off"><fieldset id="backup-export-fields">
       <h3 data-i18n="backupExportTitle">Vytvořit zálohu</h3>
@@ -63,7 +63,7 @@
       <h3 data-i18n="backupRestoreTitle">Obnovit zálohu</h3>
       <label><span data-i18n="backupFile">Soubor zálohy (.csabackup)</span><input id="restore-file" type="file" accept=".csabackup,.json,application/json" required></label>
       <label><span data-i18n="backupRestorePassword">Heslo zálohy</span><input id="restore-password" type="password" maxlength="1024" required autocomplete="off"></label>
-      <p class="settings-hint" data-i18n="backupRestoreHint">Obnova ověří S3 přístup a nahradí současné připojení. Při chybě zůstane současné nastavení zachované.</p>
+      <p class="settings-hint" data-i18n="backupRestoreHint">Obnova ověří S3 přístup a nahradí připojení. Filtry se sloučí. Filtr ze zálohy nahradí místní filtr se stejným názvem. Starší zálohy bez filtrů je nezmění.</p>
       <button type="submit" class="primary" data-i18n="backupRestore">Obnovit a připojit</button>
     </fieldset></form>
     <p id="backup-message" class="settings-message" role="status" aria-live="polite" hidden></p>

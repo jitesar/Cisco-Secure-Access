@@ -15,6 +15,34 @@ function validateSavedFilters(value){
   }
   return value;
 }
+function copySavedFilters(value){
+  return validateSavedFilters(value).map(({name,source,mode,scope,subnet,identity,hours,from,to})=>({name,source,mode,scope,subnet,identity,hours,from,to}));
+}
+function readSavedFilters(){
+  try{const raw=localStorage.getItem(SAVED_FILTERS_KEY);return copySavedFilters(raw?JSON.parse(raw):[])}catch(_){throw Error('savedFiltersStorageRead')}
+}
+function stageSavedFilterRestore(snapshot){
+  // Old backups do not change the browser's saved filters.
+  if(!Object.prototype.hasOwnProperty.call(snapshot,'savedFilters'))return null;
+  const incoming=copySavedFilters(snapshot.savedFilters),existing=readSavedFilters();
+  const merged=new Map(existing.map(item=>[item.name,item]));
+  for(const item of incoming)merged.set(item.name,item);
+  const next=[...merged.values()];if(next.length>100)throw Error('savedFiltersLimit');
+  const staged=JSON.stringify(next);let previous;
+  try{previous=localStorage.getItem(SAVED_FILTERS_KEY);localStorage.setItem(SAVED_FILTERS_KEY,staged)}catch(_){throw Error('savedFiltersStorage')}
+  return {previous,staged};
+}
+function rollbackSavedFilterRestore(transaction){
+  if(!transaction)return;
+  // Do not overwrite a newer edit made in a different application tab.
+  if(localStorage.getItem(SAVED_FILTERS_KEY)!==transaction.staged)return;
+  if(transaction.previous===null)localStorage.removeItem(SAVED_FILTERS_KEY);
+  else localStorage.setItem(SAVED_FILTERS_KEY,transaction.previous);
+}
+function finishSavedFilterRestore(transaction){
+  if(!transaction)return;
+  savedFilters=readSavedFilters();renderSavedFilters();
+}
 function savedFilterFeedback(key){savedFilterMessage=key;$('#saved-filter-message').textContent=t(key)}
 function renderSavedFilters(selected=$('#saved-filter-select').value){
   $('#saved-filter-select').replaceChildren(new Option(t('savedFilterChoose'),''),...savedFilters.map(item=>new Option(item.name,item.name)));
