@@ -31,7 +31,7 @@ const MESSAGES = {
     settingsInvalid:'Zkontroluj S3 cestu (s3://bucket/prefix/) a AWS region.', settingsKeysRequired:'Zadej platnou dvojici Access Key ID a Secret Access Key. Při změně připojení jsou nové klíče povinné.',
     settingsBusy:'Probíhá import nebo jiná operace. Počkej na dokončení a zkus to znovu.', settingsProbeFailed:'S3 nevrátilo očekávaný seznam souborů.',
     settingsFailed:'Nastavení se nepodařilo uložit. Původní připojení zůstává k dispozici.', settingsReload:'Obnov stránku a zkus to znovu.',
-    title:'CSA · Přenosy dat', local:'Lokální aplikace · S3', heading:'Vaše přenosy. Pod drobnohledem.', subtitle:'Objem dat podle sítě, identity a času.',
+    title:'CSA · Přenosy dat', local:'Lokální aplikace · S3', heading:'Přenosy přes CSA. V detailu.', subtitle:'Objem dat podle sítě, identity a času.',
     loadLogs:'↻ Načíst nové logy', loadingLogs:'↻ Načítám logy…', ready:'Připraveno k načtení', sourceGroup:'Zdroj měření', firewall:'Cloud Firewall', proxy:'Web proxy',
     sourceFirewall:'Přenosy síťových relací', sourceProxy:'Velikosti webových požadavků a odpovědí', filterBy:'Filtrovat podle', allSources:'Všechny zdroje', ipNetworks:'IP adresy / sítě', identity:'Identita', chooseIdentity:'Vyber identitu',
     ipHelp:'IP, CIDR či rozsah od–do. Odděl čárkou, středníkem, mezerou nebo novým řádkem.', trafficType:'Druh provozu', allTraffic:'Veškerý zaznamenaný', internet:'Internet · potvrzený', private:'Private Access · potvrzený', unknownTraffic:'Nerozlišený provoz',
