@@ -30,5 +30,5 @@ def export(destination):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('--output',type=Path,default=ROOT.parent/'output'/'csa-traffic-v0.11.zip')
+    parser.add_argument('--output',type=Path,default=ROOT.parent/'output'/'csa-traffic-v0.12.zip')
     print(export(parser.parse_args().output))

@@ -1,10 +1,10 @@
 # CSA Traffic — Cisco Secure Access Traffic Dashboard
 
-[![Download latest release ZIP](https://img.shields.io/badge/Download-latest%20release%20ZIP-2ec4a6?style=for-the-badge&logo=github)](https://github.com/jitesar/Cisco-Secure-Access/releases/latest/download/csa-traffic-v0.11.zip)
+[![Download latest release ZIP](https://img.shields.io/badge/Download-latest%20release%20ZIP-2ec4a6?style=for-the-badge&logo=github)](https://github.com/jitesar/Cisco-Secure-Access/releases/latest/download/csa-traffic-v0.12.zip)
 
-**[Download ZIP (v0.11)](https://github.com/jitesar/Cisco-Secure-Access/releases/latest/download/csa-traffic-v0.11.zip)** · [Latest release and installation notes](https://github.com/jitesar/Cisco-Secure-Access/releases/latest)
+**[Download ZIP (v0.12)](https://github.com/jitesar/Cisco-Secure-Access/releases/latest/download/csa-traffic-v0.12.zip)** · [Latest release and installation notes](https://github.com/jitesar/Cisco-Secure-Access/releases/latest)
 
-Local application, version 0.11, for analyzing traffic volumes from Cisco Secure Access logs exported to Amazon S3. Filter by subnet, IP range, address list or identity, select a time period within the last 30 days, and view upload/download totals and an hourly chart.
+Local application, version 0.12, for analyzing traffic volumes from Cisco Secure Access logs exported to Amazon S3. Filter by subnet, IP range, address list or identity, select a time period within the last 30 days, and view upload/download totals and an hourly chart.
 
 ![CSA Traffic dashboard showing Cloud Firewall traffic, a saved IP range filter, report exports and an hourly chart](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-firewall-dashboard.png)
 
@@ -12,7 +12,7 @@ The application runs on your computer and reads your S3 logs. It requires Python
 
 ## Quick start
 
-1. Download the **[v0.11 application ZIP](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-v0.11.zip)**, extract it, and open the folder containing `app.py`. Alternatively, clone the repository:
+1. Download the **[v0.12 application ZIP](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.12/csa-traffic-v0.12.zip)**, extract it, and open the folder containing `app.py`. Alternatively, clone the repository:
 
    ```sh
    git clone https://github.com/jitesar/Cisco-Secure-Access.git
