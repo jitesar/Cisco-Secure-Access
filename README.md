@@ -74,7 +74,7 @@ Select a row or source IP in **Top source IP addresses** to open its individual 
 
 Select a record's timestamp or row to expand it. The panel shows identities, exact counters and the available original fields, including destination IP/port, protocol or HTTP method, action, rule IDs and session timestamps. Proxy records can also include hostname, URL and HTTP status. Missing fields are explicitly marked; each row is a log record rather than an individual packet.
 
-![Transfer drill-down showing sortable records and expanded web proxy log details](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-transfer-details.png)
+![Transfer drill-down showing destination selection, sortable web proxy records and expanded log details](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.12/csa-traffic-transfer-detail-view.png)
 
 Older caches remain readable. Expanding an older record downloads only its source file from your configured S3 storage to backfill the available details. The application checks that the file still matches the cached records before attaching details. Normal synchronization skips unchanged files even if their details have not been cached yet. New or changed files include their details on import. S3 data is never changed.
 
