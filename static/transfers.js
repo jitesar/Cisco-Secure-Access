@@ -20,7 +20,13 @@ async function fetchTransfers(){
 function transferBytes(value){return value===null?t('transferMissingValue'):bytes(value)}
 function transferTotal(item){return item.sent===null&&item.received===null?t('transferMissingValue'):bytes((item.sent||0)+(item.received||0))+(item.sent===null||item.received===null?' *':'')}
 function transferProtocol(value){return ({'6':'TCP (6)','17':'UDP (17)','1':'ICMP (1)','58':'ICMPv6 (58)'})[value]||value||'—'}
-function transferTime(ts){return new Intl.DateTimeFormat(locale,{timeZone:'Europe/Prague',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(ts*1000))}
+function transferTime(ts){return displayTimestamp(ts*1000)}
+function transferFieldValue(key,value){
+  if(['timestamp','firstpackettimestamp','lastpackettimestamp'].includes(key)){
+    const raw=String(value).trim().replace(' ','T'),date=new Date(/(?:Z|[+-]\d\d:?\d\d)$/.test(raw)?raw:raw+'Z');
+    if(Number.isFinite(+date))return displayTimestamp(date);
+  }return value;
+}
 function transferDL(entries){
   const list=document.createElement('dl');list.className='transfer-fields';
   for(const [label,value] of entries){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=String(value);list.append(dt,dd)}return list;
@@ -40,7 +46,7 @@ function renderTransfers(){
   const state=transferState;if(!state)return;
   const q=state.query, data=state.data;
   $('#transfers-title').textContent=t('transferTitle',{ip:state.ip||t('unknownIP')});
-  $('#transfers-context').textContent=t(q.get('source')==='proxy'?'proxy':'firewall')+' · '+transferTime(new Date(q.get('from')).getTime()/1000)+' - '+transferTime(new Date(q.get('to')).getTime()/1000)+' · Europe/Prague\n'+t('trafficType')+': '+t(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])+(q.get('subnet')?' · '+t('csvIP')+': '+q.get('subnet'):'')+(q.get('identity')?' · '+t('identity')+': '+q.get('identity'):'');
+  $('#transfers-context').textContent=t(q.get('source')==='proxy'?'proxy':'firewall')+' · '+transferTime(new Date(q.get('from')).getTime()/1000)+' - '+transferTime(new Date(q.get('to')).getTime()/1000)+' · '+timeZone+'\n'+t('trafficType')+': '+t(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])+(q.get('subnet')?' · '+t('csvIP')+': '+q.get('subnet'):'')+(q.get('identity')?' · '+t('identity')+': '+q.get('identity'):'');
   for(const button of document.querySelectorAll('[data-transfer-sort]')){
     const active=button.dataset.transferSort===state.sort, next=active?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(button.dataset.transferSort);
     button.disabled=state.busy;button.classList.toggle('active',active);button.closest('th').setAttribute('aria-sort',active?(state.direction==='asc'?'ascending':'descending'):'none');
@@ -70,12 +76,12 @@ function renderTransfers(){
     tr.addEventListener('click',e=>{if(!e.target.closest('button'))toggleTransfer(item)});tbody.append(tr);
     if(!state.expanded.has(item.id))continue;
     const detailRow=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.className='transfer-detail';cell.id='transfer-detail-'+item.id;
-    cell.append(transferDL([[t('sourceIP'),item.ip||t('unknownIP')],[t('identity'),item.identities.join(', ')||t('transferMissingValue')],[t('trafficType'),t(({private:'private',internet:'internet',unknown:'unknownTraffic'})[item.scope])],[t('transferUTC'),new Date(item.ts*1000).toISOString()],[t('csvReceived'),item.received===null?t('transferMissingValue'):item.received],[t('csvSent'),item.sent===null?t('transferMissingValue'):item.sent]]));
+    cell.append(transferDL([[t('sourceIP'),item.ip||t('unknownIP')],[t('identity'),item.identities.join(', ')||t('transferMissingValue')],[t('trafficType'),t(({private:'private',internet:'internet',unknown:'unknownTraffic'})[item.scope])],[t('transferUTC'),displayTimestamp(item.ts*1000)],[t('csvReceived'),item.received===null?t('transferMissingValue'):item.received],[t('csvSent'),item.sent===null?t('transferMissingValue'):item.sent]]));
     const detail=state.details.get(item.id),message=document.createElement('p');message.className='transfer-note';
     if(!detail||detail.busy)message.textContent=t('transferLoading');
     else if(detail.failure){message.textContent=translateError(detail.failure);const retry=document.createElement('button');retry.type='button';retry.className='secondary';retry.textContent=t('transferRetry');retry.addEventListener('click',()=>{state.details.delete(item.id);state.expanded.delete(item.id);toggleTransfer(item)});cell.append(retry)}
     else if(!detail.data.available)message.textContent=t('transferLegacy');
-    else{message.textContent=t('transferRawFields');cell.append(transferDL(Object.entries(detail.data.fields).map(([key,value])=>[TRANSFER_FIELDS[key]||key,value])));if(detail.data.truncated.length){const warning=document.createElement('p');warning.textContent=t('transferTruncated',{fields:detail.data.truncated.map(k=>TRANSFER_FIELDS[k]||k).join(', ')});warning.className='transfer-note';cell.append(warning)}}
+    else{message.textContent=t('transferRawFields');cell.append(transferDL(Object.entries(detail.data.fields).map(([key,value])=>[TRANSFER_FIELDS[key]||key,transferFieldValue(key,value)])));if(detail.data.truncated.length){const warning=document.createElement('p');warning.textContent=t('transferTruncated',{fields:detail.data.truncated.map(k=>TRANSFER_FIELDS[k]||k).join(', ')});warning.className='transfer-note';cell.append(warning)}}
     cell.prepend(message);detailRow.append(cell);tbody.append(detailRow);
   }
   if(focused)tbody.querySelector('[data-transfer-id="'+focused+'"]')?.focus({preventScroll:true});

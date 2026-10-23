@@ -2,19 +2,21 @@
 // Export the rendered snapshot. Never read connection settings or unsaved filters.
 function reportDocument(snapshot, translate, generated=new Date()) {
   const q=snapshot.query, totals=snapshot.totals;
+  const zone=snapshot.timeZone||timeZone,stamp=value=>displayTimestamp(value,zone);
   const total=totals.received+totals.sent;
   const seconds=(new Date(q.get('to'))-new Date(q.get('from')))/1000;
   const rows=[
     ['CSA Traffic',translate('reportTitle')],
-    [translate('reportGenerated'),generated.toISOString()],
+    [translate('timeZoneLabel'),zone],
+    [translate('reportGenerated'),stamp(generated)],
     [translate('csvSource'),translate(q.get('source')==='proxy'?'proxy':'firewall')],
     [translate('csvIP'),q.get('subnet')||translate('allSources')],
     [translate('csvIdentity'),q.get('identity')||translate('allSources')],
     [translate('csvScope'),translate(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])],
-    [translate('csvFrom'),q.get('from')],
-    [translate('csvTo'),q.get('to')],
-    [translate('reportSynced'),snapshot.lastSync||translate('reportNotSynced')],
-    [translate('reportCoverage'),snapshot.coverage.records ? new Date(snapshot.coverage.from*1000).toISOString()+' - '+new Date(snapshot.coverage.to*1000).toISOString() : translate('noHistory')],
+    [translate('csvFrom'),stamp(q.get('from'))],
+    [translate('csvTo'),stamp(q.get('to'))],
+    [translate('reportSynced'),snapshot.lastSync?stamp(snapshot.lastSync):translate('reportNotSynced')],
+    [translate('reportCoverage'),snapshot.coverage.records ? stamp(snapshot.coverage.from*1000)+' - '+stamp(snapshot.coverage.to*1000) : translate('noHistory')],
     [],[translate('summary')],
     [translate('csvReceived'),totals.received],
     [translate('csvSent'),totals.sent],
@@ -25,7 +27,7 @@ function reportDocument(snapshot, translate, generated=new Date()) {
     [translate('reportUnknown'),totals.unknown],
     [],[translate('reportNotes')],
     [translate('notice')], [translate('chartNote')],
-    [translate('reportTimeNote')],
+    [translate('reportTimeNote',{zone})],
     [translate('reportSessionNote')],
     [translate('reportPrecision')],
   ];
@@ -36,9 +38,9 @@ function reportDocument(snapshot, translate, generated=new Date()) {
   if(snapshot.importWarning)rows.push([snapshot.importWarning]);
   const hourly=[translate('csvHour'),translate('csvReceived'),translate('csvSent'),translate('reportTotalBytes')];
   const top=[translate('sourceIP'),translate('csvReceived'),translate('csvSent'),translate('reportTotalBytes'),translate('reportRecords')];
-  const series=snapshot.series.map(x=>[new Date(x.ts*1000).toISOString(),x.received,x.sent,x.received+x.sent]);
+  const series=snapshot.series.map(x=>[stamp(x.ts*1000),x.received,x.sent,x.received+x.sent]);
   const ips=snapshot.top.map(x=>[x.label==='Neznámá IP'?translate('unknownIP'):x.label,x.received,x.sent,x.received+x.sent,x.records]);
-  return {metadata:rows, hourly,top,series,ips, rows:[...rows,[],[translate('chartTitle')],hourly,...series,[],[translate('topTitle')],top,...ips]};
+  return {metadata:rows, hourly,top,series,seriesTimes:snapshot.series.map(x=>x.ts*1000),ips, rows:[...rows,[],[translate('chartTitle')],hourly,...series,[],[translate('topTitle')],top,...ips]};
 }
 
 function reportCSV(rows) {
@@ -175,7 +177,7 @@ function reportPDF(documentData, translate, formatTime, formatBytes) {
   ctx.font='17px sans-serif';
   for(let i=0;i<=4;i++){const yy=bottom-i*245/4;ctx.strokeStyle='#dce5ed';ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(right,yy);ctx.stroke();ctx.fillStyle='#53677a';ctx.fillText(formatBytes(max*i/4),M,yy+5)}
   series.forEach((r,i)=>{const x=left+i*dx,rx=r[1]/max*245,tx=r[2]/max*245;ctx.fillStyle='#24b99c';ctx.fillRect(x,bottom-rx,Math.max(.5,dx*.8),rx);ctx.fillStyle='#8875df';ctx.fillRect(x,bottom-rx-tx,Math.max(.5,dx*.8),tx)});
-  for(let i=0;i<series.length;i+=Math.max(1,Math.ceil(series.length/4))){ctx.fillStyle='#53677a';ctx.fillText(formatTime(series[i][0]),Math.min(left+i*dx,W-M-185),bottom+30)}
+  for(let i=0;i<series.length;i+=Math.max(1,Math.ceil(series.length/4))){ctx.fillStyle='#53677a';ctx.fillText(formatTime(documentData.seriesTimes[i]),Math.min(left+i*dx,W-M-185),bottom+30)}
   y=bottom+75;paragraph(translate('received')+' = '+translate('reportGreen')+' / '+translate('sent')+' = '+translate('reportPurple'));
   space(150);paragraph(translate('topTitle'),true);table(documentData.top,documentData.ips.map(r=>r.map(String)),[360,180,180,180,180]);
   space(150);paragraph(translate('hourlyVolume'),true);table(documentData.hourly,series.map(r=>r.map(String)),[420,220,220,220]);
@@ -201,12 +203,12 @@ function reportPDFPages(pages,width,height) {
 
 function downloadReport(format) {
   if(!current||loading)return;
-  const snapshot={...current,query:new URLSearchParams(current.query),importWarning:lastStatus?.error?t('importError',{error:translateError(lastStatus.error)}):lastStatus?.running?t('reportImportRunning'):''};
+  const snapshot={...current,timeZone,query:new URLSearchParams(current.query),importWarning:lastStatus?.error?t('importError',{error:translateError(lastStatus.error)}):lastStatus?.running?t('reportImportRunning'):''};
   const translate=(key,vars)=>t(key,vars),data=reportDocument(snapshot,translate);
   try {
     const content=format==='csv'?reportCSV(data.rows):format==='xls'?reportXLS(data.rows):reportPDF(data,translate,value=>timefmt.format(new Date(value)),bytes);
     const mime={csv:'text/csv;charset=utf-8',xls:'application/vnd.ms-excel',pdf:'application/pdf'}[format];
     const url=URL.createObjectURL(new Blob([content],{type:mime})),a=document.createElement('a');
-    a.href=url;a.download='csa-traffic-'+snapshot.query.get('from').slice(0,10)+'.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    a.href=url;a.download='csa-traffic-'+wallValue(new Date(snapshot.query.get('from')),snapshot.timeZone).slice(0,10)+'.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(_){error('exportFailed')}
 }

@@ -75,10 +75,10 @@ async function exportBackup(){
   try{
     requireBackupCrypto();
     snapshot=await api('/api/settings/backup',{method:'POST',body:'{}'});
-    snapshot.preferences={language};
+    snapshot.preferences={language,timeZone};
     const encrypted=await encryptBackup(snapshot,$('#backup-password').value);
     const url=URL.createObjectURL(new Blob([JSON.stringify(encrypted,null,2)+'\n'],{type:'application/json'}));
-    const link=document.createElement('a');link.href=url;link.download='csa-traffic-'+new Date().toISOString().slice(0,10)+'.csabackup';link.click();
+    const link=document.createElement('a');link.href=url;link.download='csa-traffic-'+wallValue(new Date()).slice(0,10)+'.csabackup';link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     backupFeedback('backupDownloaded');
   }catch(error){backupFeedback(error.message,'failure',true)}finally{
@@ -96,6 +96,7 @@ async function importBackup(){
   try{
     snapshot=await decryptBackup(await file.text(),$('#restore-password').value);
     const result=await api('/api/settings/restore',{method:'POST',body:JSON.stringify(snapshot)});
+    if(validTimeZone(snapshot.preferences?.timeZone))applyTimeZone(snapshot.preferences.timeZone);
     if(result.language)applyLanguage(result.language);
     await finishConnection(result,'backupRestored');
     $('#restore-file').value='';

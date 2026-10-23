@@ -6,7 +6,7 @@ const {webcrypto}=require('node:crypto');
 const path=require('node:path');
 const context=vm.createContext({crypto:webcrypto,TextEncoder,TextDecoder,btoa,atob});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/backup.js'),'utf8'),context);
-const snapshot={format:'csa-traffic-settings',version:1,settings:{s3Path:'s3://example-bucket/test/',region:'eu-central-1'},credentials:{accessKeyId:'TEST_ACCESS',secretAccessKey:'TEST_SECRET'},preferences:{language:'en'}};
+const snapshot={format:'csa-traffic-settings',version:1,settings:{s3Path:'s3://example-bucket/test/',region:'eu-central-1'},credentials:{accessKeyId:'TEST_ACCESS',secretAccessKey:'TEST_SECRET'},preferences:{language:'en',timeZone:'America/New_York'}};
 const password='test-only-password-123';
 (async()=>{
   const encrypted=await context.encryptBackup(snapshot,password);

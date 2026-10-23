@@ -40,7 +40,7 @@ function showSettings(){
   $('#settings-secret').value='';
   settingsMessage=null;backupMessage=null;clearBackupPasswords();
   $('#settings-message').hidden=true;$('#backup-message').hidden=true;
-  localizeSettings();
+  localizeSettings();localizeTimeZone();$('#settings-timezone-message').textContent='';
   if(!$('#settings-dialog').open)$('#settings-dialog').showModal();$('#settings-path').focus();
 }
 

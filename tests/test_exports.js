@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
 const context=vm.createContext({TextEncoder,TextDecoder,URLSearchParams,Intl,Date,atob,btoa});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/time.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/i18n.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/exports.js'),'utf8'),context);
 const query=new URLSearchParams({source:'firewall',from:'2026-10-22T00:30:00Z',to:'2026-10-22T02:30:00Z',subnet:'192.0.2.0/24',identity:' =HYPERLINK("https://example.invalid")\nŽluťoučký kůň',scope:'private'});
@@ -24,6 +25,16 @@ for(const lang of ['cs','en']){
   if(output){fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'report-'+lang+'.xls'),xls);fs.writeFileSync(path.join(output,'report-'+lang+'.csv'),csv)}
   const empty=context.reportDocument({...snapshot,totals:{received:0,sent:0,records:0,missing:0,unknown:0},top:[],series:[],coverage:{records:0}},context.t);
   assert.equal(empty.series.length,0);assert(empty.metadata.some(r=>r[0]===context.t('noHistoryHint')));
+}
+for(const zone of ['Europe/Prague','America/New_York','Asia/Kathmandu','UTC']){
+  const doc=context.reportDocument({...snapshot,timeZone:zone},context.t,new Date('2026-10-23T12:00:00Z'));
+  assert(doc.metadata.some(row=>row[1]===zone));
+  for(const key of ['reportGenerated','reportSynced','reportCoverage','csvFrom','csvTo']){
+    const row=doc.metadata.find(row=>row[0]===context.t(key));assert(row);assert(String(row[1]).includes('GMT'));
+  }
+  assert.equal(doc.series[0][0],context.displayTimestamp(snapshot.series[0].ts*1000,zone));
+  assert.equal(doc.seriesTimes[0],snapshot.series[0].ts*1000);
+  assert(doc.rows.some(row=>row[0]===context.t('reportTimeNote',{zone})));
 }
 assert(context.reportCSV([['\t=1+1','\n@SUM(1)','+5','-1','plain'],[5]]).includes('"\'\t=1+1"'));
 const longText='Příliš žluťoučký kůň 🐎 '.repeat(450);

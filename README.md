@@ -91,7 +91,7 @@ Firewall and proxy totals are **kept separate** because they measure different l
 
 Each record is assigned to the half-open interval `[from, to)` and an hourly bucket using its log timestamp. Bytes from a long-running session are not distributed across the duration of that session, so the chart does not necessarily represent instantaneous link utilization.
 
-The form and displayed times use `Europe/Prague`; internal filters use UTC. During the autumn daylight-saving transition, local hours repeat. For this version, choose interval boundaries outside the repeated hour.
+Choose the display time zone in **S3 settings → Date and time display**. It applies to interval inputs, history, charts, synchronization times, transfer details and all report exports. Changing zones preserves the selected absolute interval; internal filters remain UTC. Date order and 12/24-hour conventions follow the territory associated with the IANA zone (for example Czech formatting for Prague and US formatting for New York). UTC and unmapped zones use international British 24-hour formatting. UTC offsets distinguish repeated hours in displayed records. Nonexistent or ambiguous interval boundaries during daylight-saving transitions are rejected; choose a boundary outside that hour. The choice persists in this browser and is included in encrypted configuration backups.
 
 ## Export reports
 
@@ -99,7 +99,7 @@ Use **Export report** above the summary cards to download the currently displaye
 
 All three formats include:
 
-- Source, IP/identity filter, traffic type and the exact selected UTC interval.
+- Source, IP/identity filter, traffic type and the exact selected interval in the chosen display time zone.
 - Generation time, last complete synchronization and the source's available record range.
 - Received, sent and total bytes, record count, average throughput, and missing/unclassified counter counts.
 - Hourly byte values, up to 20 top source IPs and measurement/coverage notes. An ongoing or failed import is identified when known.
@@ -108,7 +108,7 @@ All three formats include:
 
 **XLS** is a native Excel 97–2003 binary workbook, with numeric cells and Unicode text. It contains one formatted `Report` worksheet; external identity labels are stored as text, never formulas. No additional spreadsheet libraries are needed to run the application.
 
-**PDF** downloads directly as a paginated A4 report, including the hourly chart and tables. Pages are rendered as images to preserve Czech characters and consistent layout across PDF viewers; text is not searchable or selectable. The chart uses `Europe/Prague`, while table timestamps are UTC. Tables include exact byte values; the displayed average rate is rounded to two decimal places.
+**PDF** downloads directly as a paginated A4 report, including the hourly chart and tables. Pages are rendered as images to preserve Czech characters and consistent layout across PDF viewers; text is not searchable or selectable. The chart and all table timestamps use the selected display time zone, which is identified in report metadata. Tables include exact byte values; the displayed average rate is rounded to two decimal places.
 
 Exports follow the current GUI language. They contain report data such as IP addresses and identities, but do not include S3 credentials or connection configuration. Report generation runs locally in the browser, without uploading data to an external service.
 
@@ -180,7 +180,7 @@ Replaced credentials files managed by the application are removed after a succes
 2. Enter a password of at least 12 characters and repeat it.
 3. Select **Download encrypted backup** to download a `.csabackup` file.
 
-The backup contains the saved S3 path, region, both current access keys and the selected language. It excludes logs, cache, database contents and machine-specific absolute paths. Unsaved settings form edits are not included. Keep the password separately; the backup cannot be recovered without it.
+The backup contains the saved S3 path, region, both current access keys, the selected language and the display time zone. It excludes logs, cache, database contents and machine-specific absolute paths. Unsaved settings form edits are not included. Keep the password separately; the backup cannot be recovered without it.
 
 ### Restore on another computer
 
@@ -202,7 +202,7 @@ The password is neither sent to the server nor stored. During an explicit backup
 
 The dark GUI supports Czech and English through the header selector. The choice is saved in browser localStorage and synchronized between open application tabs. Switching languages preserves the current filters and interval.
 
-Labels, charts, dynamic statistics, known error messages, empty states, measurement notes and CSV headers are localized. Numbers and application date labels follow the selected language; the time zone remains `Europe/Prague`. Native date controls may follow the browser or operating system language. Identity names, technical log field names and S3 error codes remain unchanged.
+Labels, charts, dynamic statistics, known error messages, empty states, measurement notes and CSV headers are localized. Numbers follow the selected GUI language; date/time formatting follows the selected time zone’s regional convention. Native date controls may follow the browser or operating system language. Identity names, technical log field names and S3 error codes remain unchanged.
 
 ## Create a distributable ZIP
 
@@ -223,6 +223,7 @@ python3 -m unittest discover -s tests -v
 node --check static/app.js
 node tests/test_backup.js
 node tests/test_filters.js
+node tests/test_time.js
 node tests/test_exports.js
 ```
 
