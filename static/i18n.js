@@ -2,6 +2,11 @@
 // Shared keys keep static UI, live reports, chart and errors in the same locale.
 const MESSAGES = {
   cs: {
+    reportExport:'Export reportu', reportExportHint:'Stáhne zobrazený report: filtry, souhrn, hodinové hodnoty a nejaktivnější IP. PDF obsahuje i graf.',
+    reportTitle:'Report datových přenosů', reportGenerated:'Vytvořeno UTC', reportSynced:'Poslední úplná synchronizace UTC', reportNotSynced:'Dosud neproběhla', reportCoverage:'Rozsah záznamů zdroje v cache UTC',
+    reportTotalBytes:'Celkem bajtů', reportRecords:'Počet záznamů', reportRate:'Průměrná rychlost (b/s)', reportMissing:'Záznamy s chybějícím počítadlem', reportUnknown:'Záznamy s nerozlišeným provozem', reportNotes:'Poznámky k měření',
+    reportTimeNote:'Časy v tabulkách jsou UTC. Graf používá Europe/Prague. Interval zahrnuje počátek a nezahrnuje konec.', reportSessionNote:'Bajty relací jsou přiřazené podle Timestamp v logu, nejsou rozdělené podle průběhu relace.', reportPrecision:'Tabulky uvádějí bajty a b/s v desetinných jednotkách. Seznam IP obsahuje nejvýše 20 nejaktivnějších adres.',
+    reportGreen:'zelená', reportPurple:'fialová', reportImportRunning:'Probíhá import. Report vychází z aktuálně zobrazeného snímku dat a nemusí být úplný.', exportFailed:'Report se nepodařilo exportovat. Zkus kratší interval nebo menší filtr.',
     backupTitle:'Záloha a obnova konfigurace', backupIntro:'Zálohuj uloženou S3 cestu, region, přístupové klíče a jazyk do souboru šifrovaného heslem. Logy se nezálohují.',
     backupSetupHint:'Nemáš ještě připojení? Existující zálohu můžeš obnovit níže.', backupExportTitle:'Vytvořit zálohu', backupPassword:'Heslo zálohy (alespoň 12 znaků)', backupConfirm:'Heslo znovu',
     backupPasswordHint:'Heslo ulož odděleně od souboru. Bez něj zálohu nelze obnovit.', backupDownload:'Stáhnout šifrovanou zálohu', backupRestoreTitle:'Obnovit zálohu', backupFile:'Soubor zálohy (.csabackup)', backupRestorePassword:'Heslo zálohy',
@@ -44,6 +49,11 @@ const MESSAGES = {
     csvHour:'Hodina UTC', csvReceived:'Přijaté bajty', csvSent:'Odeslané bajty', csvSource:'Zdroj', csvIP:'IP filtr', csvIdentity:'Identita', csvScope:'Druh provozu', csvFrom:'Filtr od UTC', csvTo:'Filtr do UTC', csvFilename:'csa-prenosy.csv',
   },
   en: {
+    reportExport:'Export report', reportExportHint:'Download the displayed report: filters, summary, hourly values and top IPs. PDF also includes the chart.',
+    reportTitle:'Data transfer report', reportGenerated:'Generated UTC', reportSynced:'Last complete synchronization UTC', reportNotSynced:'Not yet completed', reportCoverage:'Source records in cache UTC',
+    reportTotalBytes:'Total bytes', reportRecords:'Record count', reportRate:'Average throughput (b/s)', reportMissing:'Records with missing counters', reportUnknown:'Unclassified traffic records', reportNotes:'Measurement notes',
+    reportTimeNote:'Table timestamps are UTC. The chart uses Europe/Prague. The interval includes its start and excludes its end.', reportSessionNote:'Session bytes are assigned using the log Timestamp, without distributing them over the session duration.', reportPrecision:'Tables show bytes and b/s in decimal units. The IP list contains up to 20 of the most active addresses.',
+    reportGreen:'green', reportPurple:'purple', reportImportRunning:'An import is running. The report uses the displayed data snapshot and may be incomplete.', exportFailed:'Could not export the report. Try a shorter interval or a smaller filter.',
     backupTitle:'Back up and restore configuration', backupIntro:'Back up the saved S3 path, region, access keys and language in a password-encrypted file. Logs are not included.',
     backupSetupHint:'Not connected yet? You can restore an existing backup below.', backupExportTitle:'Create a backup', backupPassword:'Backup password (at least 12 characters)', backupConfirm:'Repeat password',
     backupPasswordHint:'Keep the password separate from the file. The backup cannot be recovered without it.', backupDownload:'Download encrypted backup', backupRestoreTitle:'Restore a backup', backupFile:'Backup file (.csabackup)', backupRestorePassword:'Backup password',

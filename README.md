@@ -42,7 +42,7 @@ If you keep the same S3 path and region, leave both key fields blank to reuse th
 
 - Choose **Cloud Firewall** or **Web proxy** as the source.
 - Filter by all sources, IP addresses/subnets/ranges, or identity.
-- View received and sent bytes, average throughput over the entire interval, an hourly chart, the 20 most active IP addresses, and a CSV export of hourly values.
+- View received and sent bytes, average throughput over the entire interval, an hourly chart, the 20 most active IP addresses, and CSV, XLS and PDF report exports.
 - Select Internet, Private Access or unclassified firewall traffic, based on the `Private Flow` field. An empty value is unclassified. Web proxy provides a separate Internet traffic view.
 - Use a preset or a custom From–To interval within the last 30 days, ending no later than the current time. The GUI accepts minute-level boundaries.
 
@@ -74,6 +74,25 @@ Firewall and proxy totals are **kept separate** because they measure different l
 Each record is assigned to the half-open interval `[from, to)` and an hourly bucket using its log timestamp. Bytes from a long-running session are not distributed across the duration of that session, so the chart does not necessarily represent instantaneous link utilization.
 
 The form and displayed times use `Europe/Prague`; internal filters use UTC. During the autumn daylight-saving transition, local hours repeat. For this version, choose interval boundaries outside the repeated hour.
+
+## Export reports
+
+Use **Export report** above the summary cards to download the currently displayed report as **CSV**, **Excel (.xls)** or **PDF**. Exports use the displayed snapshot and its applied filters, even if you have edited the form without selecting **Show traffic**. Downloads are temporarily disabled while a new report is loading. Reports with no matching records can also be exported.
+
+All three formats include:
+
+- Source, IP/identity filter, traffic type and the exact selected UTC interval.
+- Generation time, last complete synchronization and the source's available record range.
+- Received, sent and total bytes, record count, average throughput, and missing/unclassified counter counts.
+- Hourly byte values, up to 20 top source IPs and measurement/coverage notes. An ongoing or failed import is identified when known.
+
+**CSV** is UTF-8 with a byte-order mark and semicolon separators. It contains labeled sections for metadata, summary, hourly data and top IPs, replacing the earlier hourly-only export. Text that could be interpreted as a spreadsheet formula is escaped.
+
+**XLS** is a native Excel 97–2003 binary workbook, with numeric cells and Unicode text. It contains one formatted `Report` worksheet; external identity labels are stored as text, never formulas. No additional spreadsheet libraries are needed to run the application.
+
+**PDF** downloads directly as a paginated A4 report, including the hourly chart and tables. Pages are rendered as images to preserve Czech characters and consistent layout across PDF viewers; text is not searchable or selectable. The chart uses `Europe/Prague`, while table timestamps are UTC. Tables include exact byte values; the displayed average rate is rounded to two decimal places.
+
+Exports follow the current GUI language. They contain report data such as IP addresses and identities, but do not include S3 credentials or connection configuration. Report generation runs locally in the browser, without uploading data to an external service.
 
 ## History, import and limitations
 
@@ -183,6 +202,7 @@ Run from the repository root:
 python3 -m unittest discover -s tests -v
 node --check static/app.js
 node tests/test_backup.js
+node tests/test_exports.js
 ```
 
 Node.js 18+ is needed only for the developer checks, not to run the application. The backup tests cover encryption/decryption, incorrect passwords, tampering, format validation and fresh randomness.

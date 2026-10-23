@@ -98,7 +98,7 @@ async function submitSettings(save){
 
 async function finishConnection(result,toastKey='settingsSaved'){
     connection=result;
-    requestNo++;current=null;
+    requestNo++;current=null;updateExportButtons();
     $('#total').textContent=$('#received').textContent=$('#sent').textContent=$('#rate').textContent='—';
     $('#recordcount').textContent=t('selectPeriod');$('#top').replaceChildren();$('#export').disabled=true;draw();
     $('#identity').replaceChildren(new Option(t('chooseIdentity'),''));
