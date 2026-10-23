@@ -25,7 +25,19 @@ function draw(){const canvas=$('#chart'),rect=canvas.getBoundingClientRect(),sca
 $('#chart').addEventListener('mousemove',e=>{const canvas=$('#chart'),g=canvas._geometry,tip=$('#tooltip');if(!g?.rows.length)return;const r=canvas.getBoundingClientRect(),x=e.clientX-r.left,i=Math.floor((x-g.p.left)/g.dx);if(i<0||i>=g.rows.length){tip.hidden=true;return}const row=g.rows[i];tip.textContent=timefmt.format(new Date(row.ts*1000))+'\n'+t('received')+': '+bytes(row.received)+'\n'+t('sent')+': '+bytes(row.sent);tip.hidden=false;tip.style.left=Math.max(0,Math.min(x+10,g.w-195))+'px';tip.style.top='10px'});$('#chart').addEventListener('mouseleave',()=>$('#tooltip').hidden=true);window.addEventListener('resize',draw);
 $('#filters').addEventListener('submit',e=>{e.preventDefault();load()});$('#mode').addEventListener('change',()=>{$('#subnetfield').hidden=$('#mode').value!=='subnet';$('#identityfield').hidden=$('#mode').value!=='identity'});document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{preset(+b.dataset.hours);load()}));document.querySelectorAll('[data-source]').forEach(b=>b.addEventListener('click',()=>{source=b.dataset.source;document.querySelectorAll('[data-source]').forEach(t=>t.classList.toggle('active',t===b));$('#sourcedesc').textContent=t(source==='proxy'?'sourceProxy':'sourceFirewall');$('#scope').value='all';$('#scope').disabled=source==='proxy';if($('#mode').value==='identity'){$('#mode').value='all';$('#identityfield').hidden=true;}$('#identity').value='';load()}));
 $('#sync').addEventListener('click',async()=>{try{error('');await api('/api/sync',{method:'POST'});wasRunning=true;await status()}catch(e){error(e.message)}});
-function renderStatus(s){if(!s)return;if(s.unavailable){$('#syncstatus').textContent=t('serverUnavailable');return}$('#sync').disabled=s.running||!connection.configured;$('#sync').textContent=t(s.running?'loadingLogs':'loadLogs');$('#syncstatus').textContent=!connection.configured?t('setupRequired'):s.running?(s.total?t('syncProgress',{done:fmt.format(s.processed),total:fmt.format(s.total)}):t('findingLogs')):s.error?t('importIncomplete'):s.lastSync?t('lastSync',{time:timefmt.format(new Date(s.lastSync))}):t('ready')}
+function renderStatus(s){
+  if(!s)return;
+  if(s.unavailable){$('#syncstatus').textContent=t('serverUnavailable');return}
+  $('#sync').disabled=s.running||!connection.configured;$('#sync').textContent=t(s.running?'loadingLogs':'loadLogs');
+  let text=!connection.configured?t('setupRequired'):s.error?t('importIncomplete'):s.lastSync?t('lastSync',{time:timefmt.format(new Date(s.lastSync))}):t('ready');
+  if(s.running){
+    if(s.phase==='listing')text=t('syncListing',{done:fmt.format(s.directoriesDone||0),total:fmt.format(s.directoriesTotal||62),n:fmt.format(s.listed||0)});
+    else if(s.phase==='cleanup')text=t('syncCleaning');
+    else if(s.phase==='downloading')text=t('syncDownloading',{done:fmt.format(s.processed||0),total:fmt.format(s.total||0),skipped:fmt.format(s.skipped||0)});
+    else text=s.total?t('syncProgress',{done:fmt.format(s.processed),total:fmt.format(s.total)}):t('findingLogs');
+  }else if(s.phase==='complete')text+=' · '+t('syncResult',{downloaded:fmt.format(s.downloaded||0),skipped:fmt.format(s.skipped||0),seconds:fmt.format(s.durationSeconds||0)});
+  $('#syncstatus').textContent=text;
+}
 async function status(){try{const s=await api('/api/status');lastStatus=s;renderStatus(s);if(wasRunning&&!s.running){wasRunning=false;await load()}if(s.error)error({key:'importError',vars:{error:s.error}});if(s.running)wasRunning=true}catch(e){lastStatus={unavailable:true};renderStatus(lastStatus)}}
 document.querySelectorAll('[data-report-format]').forEach(button=>button.addEventListener('click',()=>downloadReport(button.dataset.reportFormat)));
 for(const field of [$('#from'),$('#to')])field.addEventListener('input',()=>document.querySelectorAll('[data-hours]').forEach(b=>b.classList.remove('selected')));

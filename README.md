@@ -66,7 +66,7 @@ Select a row or source IP in **Top source IP addresses** to open its individual 
 
 Select a record's timestamp or row to expand it. The panel shows identities, exact counters and the available original fields, including destination IP/port, protocol or HTTP method, action, rule IDs and session timestamps. Proxy records can also include hostname, URL and HTTP status. Missing fields are explicitly marked; each row is a log record rather than an individual packet.
 
-Older caches remain readable. Expanding an older record downloads only its source file from your configured S3 storage to backfill the available details. The application checks that the file still matches the cached records before attaching details. **Load new logs** also backfills details for existing files during the next import. S3 data is never changed.
+Older caches remain readable. Expanding an older record downloads only its source file from your configured S3 storage to backfill the available details. The application checks that the file still matches the cached records before attaching details. Normal synchronization skips unchanged files even if their details have not been cached yet. New or changed files include their details on import. S3 data is never changed.
 
 If the cache changes during browsing, refresh the main report before reopening the transfers. This prevents combining pages from different cache versions. Source-file paths and customer S3 prefixes are not included in detail responses. Fields longer than 16,384 characters are explicitly marked as truncated. Detailed fields, including URLs and identities, are stored in the local cache and should be treated as private report data.
 
@@ -110,15 +110,17 @@ The available-history panel shows the first and last cached record for the selec
 
 After the initial connection or configuration restore, refresh data manually using the synchronization button. The importer:
 
-- Lists the last 31 UTC date directories under `firewalllogs` and `proxylogs`, including paginated S3 results.
-- Imports complete files and tracks each file by S3 key and ETag to avoid duplicate rows.
+- Checks all 62 date/source directories within the last 31 UTC days, including paginated S3 results. Up to four listing requests run concurrently, so late-arriving logs in older directories remain discoverable.
+- Compares the S3 listing with the local key/ETag manifest and downloads only new or changed files. Missing detail fields in an otherwise unchanged cached file do not trigger a full re-download; they are fetched on demand when a transfer is expanded.
+- Downloads up to four files concurrently into a private temporary directory. A single database writer parses one file at a time and commits each complete file atomically. The number of queued downloads is bounded. Newer date directories are prioritized.
+- Displays separate progress for checking S3 folders, importing new/changed files and cleanup, followed by imported/unchanged file counts and elapsed time.
 - Atomically replaces a file's old rows if its ETag changes.
 - Keeps successfully imported files if another file fails, and reports an incomplete import.
-- Deletes records older than 31 days after a successful import.
+- Deletes records and their details older than 31 days after a successful import. Recent empty-file manifests are retained to avoid downloading empty logs repeatedly; old manifests without cached records expire.
 
 Supported formats include CSV with named headers and headerless v10/v17 files with exactly 34/40 firewall columns or 49/57 proxy columns. Mixed versions during a schema upgrade are supported. Other headerless layouts are rejected to avoid interpreting the wrong columns as byte counters.
 
-A file may be up to 150 MB compressed. This version keeps a parsed file and the selected report in memory; large deployments require streaming and more scalable storage. Late events placed in directories outside the imported date window may be missed. The first and last record timestamps do not prove complete coverage. S3 contents are never modified.
+A file may be up to 150 MB compressed. At most four compressed downloads are held in temporary storage (up to approximately 600 MB at the file-size limit). Compressed files are read from disk during parsing and temporary files are removed on completion or failure. This version keeps one parsed file and the selected report in memory; very large deployments still require streaming parsed rows and more scalable storage. Late events placed in directories outside the imported date window may be missed. The first and last record timestamps do not prove complete coverage. S3 contents are never modified.
 
 ## Configuration and credential storage
 

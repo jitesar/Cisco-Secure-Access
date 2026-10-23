@@ -2,6 +2,7 @@
 """Local Cisco Secure Access usage explorer. Python standard library + curl."""
 import argparse
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import csv
 import datetime as dt
 import gzip
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 import webbrowser
 import xml.etree.ElementTree as ET
@@ -30,7 +32,12 @@ BUCKET = None
 PREFIX = None
 REGION = None
 NS = {'s': 'http://s3.amazonaws.com/doc/2006-03-01/'}
-STATE = {'running': False, 'processed': 0, 'total': 0, 'error': None, 'lastSync': None}
+def sync_progress(phase=None):
+    return {'processed':0,'total':0,'skipped':0,'downloaded':0,'listed':0,
+            'directoriesDone':0,'directoriesTotal':62,'phase':phase,'durationSeconds':0}
+
+
+STATE = {'running': False, 'error': None, 'lastSync': None, **sync_progress()}
 LOCK = threading.Lock()
 RUNTIME_LOCK = threading.RLock()
 SETTINGS_LOCK = threading.Lock()
@@ -40,6 +47,7 @@ ACTIVE_SETTINGS = None
 DB = ROOT / '.cache' / 'traffic.sqlite'
 CREDENTIALS = None
 HISTORY_DAYS = 30
+IMPORT_WORKERS = 4
 
 
 def user_directory():
@@ -154,7 +162,7 @@ def activate_settings(settings, last_sync=None):
         ACTIVE_SETTINGS = settings
         BUCKET, PREFIX, REGION = settings['bucket'], settings['prefix'], settings['region']
         CREDENTIALS, DB = settings['credentials'], settings['database']
-        STATE.update(running=False, processed=0, total=0, error=None, lastSync=last_sync)
+        STATE.update(running=False, error=None, lastSync=last_sync, **sync_progress())
 
 
 def connection_candidate(data):
@@ -373,7 +381,8 @@ DETAIL_FIELDS = set('timestamp direction protocol sourceip sourceport destinatio
 
 
 def parse_log(blob, source, key, details=None):
-    with io.TextIOWrapper(gzip.GzipFile(fileobj=io.BytesIO(blob)), encoding='utf-8-sig', newline='') as stream:
+    raw = io.BytesIO(blob) if isinstance(blob, (bytes,bytearray)) else open(blob,'rb')
+    with raw, io.TextIOWrapper(gzip.GzipFile(fileobj=raw), encoding='utf-8-sig', newline='') as stream:
         # Cisco v10 positional fields; only exact documented widths are accepted.
         positional = {
             'firewall': 'timestamp,origin ids,identities,identity type,direction,protocol,packet size,source ip,source port,destination ip,destination port,data center,rule id,action,fqdns,destination list ids,first packet timestamp,last packet timestamp,packets sent,packets received,bytes sent,bytes received,fw event id,destination country,aws region,app id,private app group id,private flow,posture id,casi category ids,traffic source,content category ids,content category list ids,organization id'.split(','),
@@ -436,20 +445,32 @@ class S3:
         if not all(data.get(k, '').strip() for k in ['accessKeyId', 'secretAccessKey']):
             raise ValueError('Soubor s přístupovými údaji není vyplněný')
 
-    def get(self, path, timeout=90):
+    def _request(self, path, timeout=90, destination=None):
         config = 'user = ' + json.dumps(self.auth) + '\n'
         suffix = 'amazonaws.com.cn' if self.region.startswith('cn-') else 'amazonaws.com'
-        proc = subprocess.run(['curl', '--silent', '--show-error', '--connect-timeout', '10', '--max-time', str(timeout), '--max-filesize', '150000000', '--aws-sigv4', 'aws:amz:'+self.region+':s3', '--config', '-', '--write-out', '\n%{http_code}', 'https://s3.'+self.region+'.'+suffix+'/'+self.bucket+'/'+path], input=config.encode(), capture_output=True)
+        output = ['--output',str(destination)] if destination is not None else []
+        proc = subprocess.run(['curl', '--silent', '--show-error', '--connect-timeout', '10', '--max-time', str(timeout), '--max-filesize', '150000000', '--aws-sigv4', 'aws:amz:'+self.region+':s3', '--config', '-', '--write-out', '\n%{http_code}', *output, 'https://s3.'+self.region+'.'+suffix+'/'+self.bucket+'/'+path], input=config.encode(), capture_output=True)
         if proc.returncode:
             raise RuntimeError('Připojení k S3 selhalo (curl ' + str(proc.returncode) + ')')
         body, status = proc.stdout.rsplit(b'\n', 1)
         if status != b'200':
             try:
+                if destination is not None:
+                    with open(destination,'rb') as handle:
+                        body = handle.read(65536)
                 code = ET.fromstring(body).findtext('Code') or 'Unknown'
+                if not re.fullmatch(r'[A-Za-z][A-Za-z0-9]{0,80}',code):
+                    code = 'Unknown'
             except ET.ParseError:
                 code = 'Unknown'
             raise RuntimeError('S3 HTTP ' + status.decode() + ': ' + code)
         return body
+
+    def get(self, path, timeout=90):
+        return self._request(path,timeout)
+
+    def download(self, path, destination):
+        self._request(path,destination=destination)
 
     def list(self, prefix):
         token = None
@@ -474,54 +495,109 @@ def ingest():
         ingest_unlocked()
 
 
+def parallel_results(executor, items, function):
+    """Bound both network requests and completed files waiting for the DB writer."""
+    iterator = iter(items)
+    pending = {}
+    def submit_one():
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        pending[executor.submit(function,item)] = item
+    for _ in range(IMPORT_WORKERS):
+        submit_one()
+    try:
+        while pending:
+            done, _ = wait(pending,return_when=FIRST_COMPLETED)
+            for future in done:
+                item = pending.pop(future)
+                yield item, future.result()
+                submit_one()
+    finally:
+        for future in pending:
+            future.cancel()
+
+
 def ingest_unlocked():
+    started = time.perf_counter()
+    with LOCK:
+        STATE.update(running=True,error=None,**sync_progress('listing'))
     try:
         client = S3(CREDENTIALS)
         today = utc_now().date()
-        files = []
-        for source, folder in [('firewall', 'firewalllogs'), ('proxy', 'proxylogs')]:
-            for days in range(HISTORY_DAYS, -1, -1):
-                day = today - dt.timedelta(days=days)
-                files.extend((source, key, etag) for key, etag in client.list(PREFIX + folder + '/' + day.isoformat() + '/'))
+        directories = [(source,PREFIX+folder+'/'+(today-dt.timedelta(days=days)).isoformat()+'/')
+                       for days in range(HISTORY_DAYS,-1,-1)
+                       for source,folder in [('firewall','firewalllogs'),('proxy','proxylogs')]]
         with LOCK:
-            STATE['total'] = len(files)
+            STATE['directoriesTotal'] = len(directories)
         with connect() as db:
-            for source, key, etag in files:
-                old = db.execute('SELECT etag FROM files WHERE key=?', (key,)).fetchone()
-                detailed = db.execute('SELECT 1 FROM detailed_files WHERE key=?', (key,)).fetchone()
-                if not old or old['etag'] != etag or not detailed:
-                    details = []
-                    rows = parse_log(client.get(urllib.parse.quote(key, safe='/')), source, key, details)
-                    with db:
-                        db.execute('DELETE FROM events WHERE file=?', (key,))
-                        db.execute('DELETE FROM event_details WHERE file=?', (key,))
-                        db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)', rows)
-                        db.executemany('INSERT INTO event_details VALUES (?,?,?)', details)
-                        db.execute('INSERT OR REPLACE INTO detailed_files VALUES (?)', (key,))
-                        db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)', (key, etag, utc_now().isoformat()))
-                        db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
+            known = {row['key']:row['etag'] for row in db.execute('SELECT key,etag FROM files')}
+        # A private temporary directory holds at most four compressed files. Only
+        # one file is parsed in memory, and only this thread writes SQLite.
+        with tempfile.TemporaryDirectory(prefix='csa-import-') as temporary, ThreadPoolExecutor(max_workers=IMPORT_WORKERS) as executor:
+            files = {}
+            for (source,_), listed in parallel_results(executor,directories,lambda item:list(client.list(item[1]))):
+                for key,etag in listed:
+                    files[key] = (source,key,etag)
                 with LOCK:
-                    STATE['processed'] += 1
-            synced = utc_now().isoformat()
-            with db:
-                cutoff = (utc_now() - dt.timedelta(days=HISTORY_DAYS + 1)).timestamp()
-                db.execute('DELETE FROM events WHERE ts < ?', (cutoff,))
-                # Once rows have expired, their file must be eligible for a later reimport.
-                db.execute('DELETE FROM files WHERE key NOT IN (SELECT DISTINCT file FROM events)')
-                db.execute('DELETE FROM event_details WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.file=event_details.file AND e.rownum=event_details.rownum)')
-                db.execute('DELETE FROM detailed_files WHERE key NOT IN (SELECT key FROM files)')
-                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('lastSync', synced))
-                db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
+                    STATE['directoriesDone'] += 1
+                    STATE['listed'] = len(files)
+            pending = sorted((item for item in files.values() if item[1] not in known or not item[2] or known[item[1]] != item[2]),key=lambda item:(item[1].split('/')[-2],item[1]),reverse=True)
             with LOCK:
-                STATE['lastSync'] = synced
+                STATE.update(phase='downloading',total=len(pending),skipped=len(files)-len(pending))
+            def download(item):
+                _,key,_ = item
+                descriptor,path = tempfile.mkstemp(suffix='.csv.gz',dir=temporary)
+                os.close(descriptor)
+                if hasattr(client,'download'):
+                    client.download(urllib.parse.quote(key,safe='/'),path)
+                else:
+                    # Simple in-memory clients are also useful in offline tests.
+                    Path(path).write_bytes(client.get(urllib.parse.quote(key,safe='/')))
+                return path
+            with connect() as db:
+                for (source,key,etag),path in parallel_results(executor,pending,download):
+                    try:
+                        details = []
+                        rows = parse_log(path,source,key,details)
+                        with db:
+                            db.execute('DELETE FROM events WHERE file=?',(key,))
+                            db.execute('DELETE FROM event_details WHERE file=?',(key,))
+                            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',rows)
+                            db.executemany('INSERT INTO event_details VALUES (?,?,?)',details)
+                            db.execute('INSERT OR REPLACE INTO detailed_files VALUES (?)',(key,))
+                            db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)',(key,etag,utc_now().isoformat()))
+                            db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
+                    finally:
+                        Path(path).unlink(missing_ok=True)
+                    with LOCK:
+                        STATE['processed'] += 1
+                        STATE['downloaded'] += 1
+                    del rows, details
+                with LOCK:
+                    STATE['phase'] = 'cleanup'
+                synced = utc_now().isoformat()
+                with db:
+                    cutoff = utc_now()-dt.timedelta(days=HISTORY_DAYS+1)
+                    db.execute("DELETE FROM event_details WHERE (file,rownum) IN (SELECT file,rownum FROM events WHERE source IN ('firewall','proxy') AND ts < ?)",(cutoff.timestamp(),))
+                    db.execute("DELETE FROM events WHERE source IN ('firewall','proxy') AND ts < ?",(cutoff.timestamp(),))
+                    # Keep recent empty-file manifests too, so empty logs are not
+                    # repeatedly downloaded. Old manifests without events expire.
+                    db.execute("DELETE FROM files WHERE key NOT IN (SELECT DISTINCT file FROM events) AND (julianday(imported) IS NULL OR julianday(imported)<julianday(?))",(cutoff.isoformat(),))
+                    db.execute('DELETE FROM detailed_files WHERE key NOT IN (SELECT key FROM files)')
+                    db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',('lastSync',synced))
+                    db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
+                with LOCK:
+                    STATE.update(lastSync=synced,phase='complete')
     except Exception as error:
         # Do not echo credentials, response bodies, or arbitrary exception text.
-        message = str(error) if isinstance(error, (RuntimeError, ValueError)) else type(error).__name__
+        message = str(error) if isinstance(error,(RuntimeError,ValueError)) else type(error).__name__
         with LOCK:
-            STATE['error'] = message
+            STATE.update(error=message,phase='failed')
     finally:
         with LOCK:
-            STATE['running'] = False
+            STATE.update(running=False,durationSeconds=round(time.perf_counter()-started,2))
 
 
 def start_sync():
@@ -533,7 +609,7 @@ def start_sync():
                 return
             if not ACTIVE_SETTINGS:
                 raise ValueError('setupRequired')
-            STATE.update(running=True, processed=0, total=0, error=None)
+            STATE.update(running=True,error=None,**sync_progress('listing'))
         threading.Thread(target=ingest, daemon=True).start()
     finally:
         RUNTIME_LOCK.release()

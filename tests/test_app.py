@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -269,6 +270,154 @@ class TrafficTests(unittest.TestCase):
             self.assertIn(app.PREFIX+'proxylogs/2026-10-22/',prefixes)
         finally:
             app.STATE.clear();app.STATE.update(original)
+
+    def test_parallel_import_is_bounded_incremental_and_skips_legacy_details(self):
+        today=app.utc_now().date().isoformat()
+        prefix=app.PREFIX+'firewalllogs/'+today+'/'
+        blobs={prefix+str(i).zfill(2)+'.csv.gz':self.blob([
+            ['Timestamp','Source IP','Bytes Sent','Bytes Received'],
+            [today+' 12:00:00','10.1.2.3',str(i),'20'],
+        ]) for i in range(12)}
+        lock=threading.Lock()
+        listing_barrier=threading.Barrier(app.IMPORT_WORKERS)
+        download_barrier=threading.Barrier(app.IMPORT_WORKERS)
+        parsed_threads=[]
+        parsed=app.parse_log
+        class FakeS3:
+            listing_calls=0
+            downloads=0
+            active=0
+            peak=0
+            max_files=0
+            temporary=set()
+            changed=False
+            def __init__(self,_): pass
+            def list(self,path):
+                with lock:
+                    FakeS3.listing_calls+=1
+                    count=FakeS3.listing_calls
+                if count<=app.IMPORT_WORKERS: listing_barrier.wait(timeout=5)
+                return [(key,'two' if self.changed and key.endswith('00.csv.gz') else 'one') for key in blobs] if path==prefix else []
+            def download(self,key,path):
+                with lock:
+                    FakeS3.downloads+=1
+                    count=FakeS3.downloads
+                    FakeS3.active+=1
+                    FakeS3.peak=max(FakeS3.peak,FakeS3.active)
+                    FakeS3.temporary.add(str(Path(path).parent))
+                try:
+                    if count<=app.IMPORT_WORKERS: download_barrier.wait(timeout=5)
+                    Path(path).write_bytes(blobs[key])
+                    with lock: FakeS3.max_files=max(FakeS3.max_files,len(list(Path(path).parent.glob('*.csv.gz'))))
+                finally:
+                    with lock: FakeS3.active-=1
+        def parse_file(path,*args):
+            self.assertIsInstance(path,str)
+            parsed_threads.append(threading.get_ident())
+            return parsed(path,*args)
+        original=dict(app.STATE)
+        try:
+            with patch.object(app,'S3',FakeS3),patch.object(app,'parse_log',side_effect=parse_file):
+                app.ingest()
+                self.assertIsNone(app.STATE['error'])
+                self.assertEqual(FakeS3.peak,app.IMPORT_WORKERS)
+                self.assertLessEqual(FakeS3.max_files,app.IMPORT_WORKERS)
+                self.assertEqual(set(parsed_threads),{threading.get_ident()})
+                self.assertTrue(all(not Path(p).exists() for p in FakeS3.temporary))
+                self.assertEqual(app.STATE['downloaded'],12)
+                with app.connect() as db:
+                    db.execute('DELETE FROM event_details')
+                    db.execute('DELETE FROM detailed_files')
+                app.ingest()
+                self.assertIsNone(app.STATE['error'])
+                self.assertEqual(FakeS3.downloads,12)
+                self.assertEqual((app.STATE['skipped'],app.STATE['total']),(12,0))
+                FakeS3.changed=True
+                first=prefix+'00.csv.gz'
+                blobs[first]=self.blob([['Timestamp','Source IP','Bytes Sent','Bytes Received'],[today+' 12:00:00','10.1.2.3','100','20']])
+                app.ingest()
+                self.assertIsNone(app.STATE['error'])
+                self.assertEqual(FakeS3.downloads,13)
+                self.assertEqual((app.STATE['downloaded'],app.STATE['skipped']),(1,11))
+                with app.connect() as db:
+                    self.assertEqual(tuple(db.execute('SELECT COUNT(*),SUM(sent) FROM events').fetchone()),(12,166))
+        finally:
+            app.STATE.clear();app.STATE.update(original)
+
+    def test_failed_parallel_import_keeps_working_rows_and_cleans_temporary_files(self):
+        today=app.utc_now().date().isoformat()
+        prefix=app.PREFIX+'firewalllogs/'+today+'/'
+        key=prefix+'a.csv.gz'
+        def blob(sent):
+            return self.blob([['Timestamp','Source IP','Bytes Sent','Bytes Received'],[today+' 12:00:00','10.1.2.3',str(sent),'20']])
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',app.parse_log(blob(10),'firewall',key))
+            db.execute('INSERT INTO files VALUES (?,?,?)',(key,'old',app.utc_now().isoformat()))
+        class FakeS3:
+            fail=True
+            temporary=set()
+            def __init__(self,_): pass
+            def list(self,path): return [(key,'new'),(prefix+'b.csv.gz','new')] if path==prefix else []
+            def download(self,item,path):
+                self.temporary.add(str(Path(path).parent))
+                Path(path).write_bytes(blob(100 if item==key else 200))
+                if self.fail and item==key: raise RuntimeError('S3 HTTP 503: SlowDown')
+        original=dict(app.STATE)
+        try:
+            with patch.object(app,'S3',FakeS3):
+                app.STATE['lastSync']='previous-success'
+                app.ingest()
+                self.assertEqual(app.STATE['phase'],'failed')
+                self.assertEqual(app.STATE['lastSync'],'previous-success')
+                self.assertTrue(all(not Path(p).exists() for p in FakeS3.temporary))
+                with app.connect() as db:
+                    self.assertEqual(db.execute('SELECT sent FROM events WHERE file=?',(key,)).fetchone()[0],10)
+                    self.assertEqual(db.execute('SELECT etag FROM files WHERE key=?',(key,)).fetchone()[0],'old')
+                FakeS3.fail=False
+                app.ingest()
+                self.assertIsNone(app.STATE['error'])
+                with app.connect() as db:
+                    self.assertEqual(tuple(db.execute('SELECT COUNT(*),SUM(sent) FROM events').fetchone()),(2,300))
+        finally:
+            app.STATE.clear();app.STATE.update(original)
+
+    def test_recent_empty_files_are_not_downloaded_repeatedly(self):
+        today=app.utc_now().date().isoformat()
+        prefix=app.PREFIX+'firewalllogs/'+today+'/'
+        key=prefix+'empty.csv.gz'
+        blob=self.blob([['Timestamp','Source IP','Bytes Sent','Bytes Received']])
+        class FakeS3:
+            calls=0
+            def __init__(self,_): pass
+            def list(self,path): return [(key,'same')] if path==prefix else []
+            def get(self,_):
+                FakeS3.calls+=1
+                return blob
+        original=dict(app.STATE)
+        try:
+            with patch.object(app,'S3',FakeS3):
+                app.ingest();app.ingest()
+                self.assertIsNone(app.STATE['error'])
+                self.assertEqual(FakeS3.calls,1)
+                self.assertEqual(app.STATE['skipped'],1)
+        finally:
+            app.STATE.clear();app.STATE.update(original)
+
+    def test_s3_download_streams_to_file_and_keeps_auth_out_of_arguments(self):
+        output=Path(self.temp.name)/'download.gz'
+        client=app.S3(values={'accessKeyId':'TEST_ACCESS','secretAccessKey':'TEST_SECRET'},settings={'region':'eu-central-1','bucket':'example-bucket'})
+        def success(args,**kwargs):
+            self.assertIn('--output',args)
+            self.assertNotIn('TEST_SECRET',' '.join(args))
+            self.assertIn(b'TEST_SECRET',kwargs['input'])
+            Path(args[args.index('--output')+1]).write_bytes(b'test compressed bytes')
+            return type('Result',(),{'returncode':0,'stdout':b'\n200'})()
+        with patch.object(app.subprocess,'run',side_effect=success):
+            client.download('test.csv.gz',output)
+        self.assertEqual(output.read_bytes(),b'test compressed bytes')
+        output.write_bytes(b'<Error><Code>AccessDenied</Code></Error>')
+        with patch.object(app.subprocess,'run',return_value=type('Result',(),{'returncode':0,'stdout':b'\n403'})()):
+            self.assertRaisesRegex(RuntimeError,'S3 HTTP 403: AccessDenied',client.download,'test.csv.gz',output)
 
     def test_20_day_history_survives_import_and_expired_cache_is_removed(self):
         day=(app.utc_now()-dt.timedelta(days=20)).date().isoformat()
