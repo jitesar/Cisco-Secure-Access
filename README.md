@@ -53,10 +53,14 @@ If you keep the same S3 path and region, leave both key fields blank to reuse th
 | `10.20.0.0/16` | An IPv4 subnet in CIDR notation |
 | `10.20.1.5` | One address |
 | `10.20.1.10-10.20.1.50` | An inclusive address range |
+| `10-11.30-33.1-2.3-50` | All IPv4 combinations of the four octet ranges (768 addresses) |
+| `10.30.1.3-50` | Last-octet range with the other octets fixed |
 | `10.20.1.5, 10.30.0.0/16` | A combination of addresses and subnets |
 | `2001:db8::/64` | An IPv6 subnet |
 
-Separate entries with commas, semicolons, spaces or newlines. Both range endpoints must use the same IP version. Ranges are compared without expanding them into individual addresses, and overlapping entries do not double-count traffic.
+Separate entries with commas, semicolons, spaces or newlines. Full address range endpoints must use the same IP version. Ranges are compared without expanding them into individual addresses, and overlapping entries do not double-count traffic.
+
+IPv4 octet ranges use either a single value or an inclusive `low-high` range in each of the four positions. Each bound must be between 0 and 255, with the lower bound first. For example, `10-11.30-33.1-2.3-50` includes `10.30.1.3` and `11.33.2.50`, but excludes `10.34.1.3` and `10.30.1.51`. It is a combination of independent octet ranges, not one continuous interval between two addresses. You can mix it with IPs, CIDRs and full IPv4/IPv6 ranges in the same filter. Octet-range syntax is IPv4-only; IPv6 continues to use full addresses, CIDRs or full address ranges.
 
 Subnet filters match source IP addresses recorded in the logs. NAT may hide the original subnet. Text identity labels are preserved as a whole; JSON identity arrays are split into individual entries. The application does not currently retrieve AD/Entra group membership.
 

@@ -270,17 +270,29 @@ def utc_now():
 
 
 def parse_ip_filter(value):
-    """Union of CIDRs, individual IPs and inclusive address ranges; no enumeration."""
+    """Union of CIDRs, full address ranges and IPv4 octet boxes; no enumeration."""
     value = re.sub(r'\s*[-–—]\s*', '-', value.strip())
     if not value:
         return []
     parts = [p for p in re.split(r'[,;\s]+', value) if p]
     if len(parts) > 1000:
         raise ValueError('Použij nejvýše 1000 položek v IP filtru')
-    ranges = []
+    ranges, boxes = [], []
     for part in parts:
         try:
-            if '-' in part:
+            if '-' in part and ':' not in part and len(part.split('.')) == 4:
+                bounds = []
+                for octet in part.split('.'):
+                    if not re.fullmatch(r'(?:0|[1-9][0-9]{0,2})(?:-(?:0|[1-9][0-9]{0,2}))?',octet):
+                        raise ValueError()
+                    ends = [int(x) for x in octet.split('-')]
+                    lo, hi = ends[0], ends[-1]
+                    if not 0 <= lo <= hi <= 255:
+                        raise ValueError()
+                    bounds.append((lo,hi))
+                boxes.append((4,tuple(lo for lo,_ in bounds),tuple(hi for _,hi in bounds)))
+                continue
+            elif '-' in part:
                 left, right = part.split('-', 1)
                 low, high = ipaddress.ip_address(left), ipaddress.ip_address(right)
                 if low.version != high.version or int(low) > int(high):
@@ -289,7 +301,7 @@ def parse_ip_filter(value):
                 network = ipaddress.ip_network(part, strict=False)
                 low, high = network.network_address, network.broadcast_address
         except ValueError:
-            raise ValueError('Neplatná položka IP filtru: ' + part[:100] + '. Použij IP, CIDR nebo vzestupný rozsah dvou úplných adres.') from None
+            raise ValueError('Neplatná položka IP filtru: ' + part[:100] + '. Použij IP, CIDR, rozsah dvou adres nebo rozsahy oktetů (např. 10-11.30-33.1-2.3-50).') from None
         ranges.append((low.version, int(low), int(high)))
     merged = []
     for version, low, high in sorted(ranges):
@@ -297,7 +309,7 @@ def parse_ip_filter(value):
             merged[-1] = (version, merged[-1][1], max(high, merged[-1][2]))
         else:
             merged.append((version, low, high))
-    return merged
+    return merged+list(dict.fromkeys(boxes))
 
 
 def matches_ip(value, ranges):
@@ -307,7 +319,16 @@ def matches_ip(value, ranges):
         address = ipaddress.ip_address(value)
     except ValueError:
         return False
-    return any(address.version == version and low <= int(address) <= high for version, low, high in ranges)
+    numeric, octets = int(address), address.packed
+    for version, low, high in ranges:
+        if address.version != version:
+            continue
+        if isinstance(low,tuple):
+            if all(lo <= octet <= hi for octet,lo,hi in zip(octets,low,high)):
+                return True
+        elif low <= numeric <= high:
+            return True
+    return False
 
 
 @contextmanager

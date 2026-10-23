@@ -290,6 +290,53 @@ class TrafficTests(unittest.TestCase):
             app.STATE.clear()
             app.STATE.update(original)
 
+    def test_octet_ranges_are_cartesian_and_not_continuous(self):
+        ranges = app.parse_ip_filter('10-11.30-33.1-2.3-50')
+        count = 0
+        for first in range(9,13):
+            for second in range(29,35):
+                for third in range(4):
+                    for fourth in range(2,52):
+                        address = f'{first}.{second}.{third}.{fourth}'
+                        expected = 10 <= first <= 11 and 30 <= second <= 33 and 1 <= third <= 2 and 3 <= fourth <= 50
+                        self.assertEqual(app.matches_ip(address,ranges),expected,address)
+                        count += expected
+        self.assertEqual(count,768)
+        self.assertEqual(len(ranges),1)
+        broad = app.parse_ip_filter('0-255.0-255.0-255.0-255')
+        self.assertEqual(len(broad),1)
+        for address in ['0.0.0.0','255.255.255.255','127.0.0.1']:
+            self.assertTrue(app.matches_ip(address,broad))
+        self.assertFalse(app.matches_ip('2001:db8::1',broad))
+        short = app.parse_ip_filter('10.30.1.3 – 50')
+        self.assertTrue(app.matches_ip('10.30.1.50',short))
+        self.assertFalse(app.matches_ip('10.30.2.3',short))
+        self.assertTrue(app.matches_ip('10.30.1.3',app.parse_ip_filter('10-10.30.1.3-3')))
+
+    def test_octet_ranges_reject_invalid_bounds_and_syntax(self):
+        for value in ['11-10.30.1.3','10.30-256.1.3','10.-1.1.3','10.30.1.3-',
+                      '10--11.30.1.3','010-11.30.1.3','10-11.30.1.3/24',
+                      '10-11.30.1.3.4','10-11.30.1','10-11.30.1.x','2001:db8::1-5']:
+            with self.subTest(value=value):
+                self.assertRaises(ValueError,app.parse_ip_filter,value)
+
+    def test_octet_ranges_union_report_and_drilldown(self):
+        epoch = app.timestamp('2026-10-22 12:00:00')
+        addresses = [('10.30.1.3',10,20),('11.33.2.50',30,40),
+                     ('10.31.2.51',100,200),('10.30.3.3',100,200),
+                     ('192.0.2.2',50,60),('2001:db8::1',70,80),('11.29.1.3',1000,2000)]
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',[
+                ('x',index,'firewall',epoch,address,'[]',sent,received,'unknown')
+                for index,(address,sent,received) in enumerate(addresses,1)
+            ])
+        params = {'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z',
+                  'subnet':'10-11.30-33.1-2.3-50;10.30.1.0/24,192.0.2.1-192.0.2.3\n2001:db8::/64'}
+        totals = app.report(params)['totals']
+        self.assertEqual((totals['records'],totals['sent'],totals['received']),(4,160,200))
+        self.assertEqual(app.transfers({**params,'ip':'11.33.2.50'})['totals']['records'],1)
+        self.assertEqual(app.transfers({**params,'ip':'10.31.2.51'})['totals']['records'],0)
+
     def test_ip_ranges_lists_overlap_and_ipv6(self):
         ranges = app.parse_ip_filter('10.1.0.0/24, 10.1.0.5 - 10.1.0.255; 10.2.0.1\n2001:db8::1–2001:db8::5')
         self.assertEqual(len(ranges),3)

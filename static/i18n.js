@@ -35,7 +35,7 @@ const MESSAGES = {
     title:'CSA · Přenosy dat', local:'Lokální aplikace · S3', heading:'Přenosy přes CSA. V detailu.', subtitle:'Objem dat podle sítě, identity a času.',
     loadLogs:'↻ Načíst nové logy', loadingLogs:'↻ Načítám logy…', ready:'Připraveno k načtení', sourceGroup:'Zdroj měření', firewall:'Cloud Firewall', proxy:'Web proxy',
     sourceFirewall:'Přenosy síťových relací', sourceProxy:'Velikosti webových požadavků a odpovědí', filterBy:'Filtrovat podle', allSources:'Všechny zdroje', ipNetworks:'IP adresy / sítě', identity:'Identita', chooseIdentity:'Vyber identitu',
-    ipHelp:'IP, CIDR či rozsah od–do. Odděl čárkou, středníkem, mezerou nebo novým řádkem.', trafficType:'Druh provozu', allTraffic:'Veškerý zaznamenaný', internet:'Internet · potvrzený', private:'Private Access · potvrzený', unknownTraffic:'Nerozlišený provoz',
+    ipHelp:'IP, CIDR, rozsah adres či oktetů (např. 10-11.30-33.1-2.3-50). Položky odděl čárkou, středníkem, mezerou nebo novým řádkem.', trafficType:'Druh provozu', allTraffic:'Veškerý zaznamenaný', internet:'Internet · potvrzený', private:'Private Access · potvrzený', unknownTraffic:'Nerozlišený provoz',
     from:'Od', to:'Do', showTraffic:'Zobrazit přenosy →', quickSelect:'Rychlý výběr', hour1:'1 hodina', hours24:'24 hodin', days3:'3 dny', days7:'7 dní', days30:'30 dní', timezone:'Časy: Europe/Prague',
     intervalHint:'Vlastní interval nastav v polích Od a Do, kdekoliv v posledních 30 dnech.', checkingHistory:'Ověřuji dostupnou historii…',
     notice:'Firewall a web proxy jsou samostatná měření. Jejich objemy nesčítáme, protože se provoz může překrývat.', unknownNote:'{n} záznamů nemá rozlišení Internet / Private Access.', missingNote:'U {n} záznamů chybí některé počítadlo; součet zahrnuje jen dostupné hodnoty.',
@@ -88,7 +88,7 @@ const MESSAGES = {
     title:'CSA · Data traffic', local:'Local application · S3', heading:'Your traffic. In focus.', subtitle:'Explore data usage by network, identity and time.',
     loadLogs:'↻ Load new logs', loadingLogs:'↻ Loading logs…', ready:'Ready to load', sourceGroup:'Measurement source', firewall:'Cloud Firewall', proxy:'Web proxy',
     sourceFirewall:'Network session transfers', sourceProxy:'Web request and response sizes', filterBy:'Filter by', allSources:'All sources', ipNetworks:'IP addresses / networks', identity:'Identity', chooseIdentity:'Select an identity',
-    ipHelp:'IP, CIDR or an inclusive range. Separate with commas, semicolons, spaces or new lines.', trafficType:'Traffic type', allTraffic:'All recorded traffic', internet:'Internet · confirmed', private:'Private Access · confirmed', unknownTraffic:'Unclassified traffic',
+    ipHelp:'IP, CIDR, address range or IPv4 octet ranges (e.g. 10-11.30-33.1-2.3-50). Separate entries with commas, semicolons, spaces or new lines.', trafficType:'Traffic type', allTraffic:'All recorded traffic', internet:'Internet · confirmed', private:'Private Access · confirmed', unknownTraffic:'Unclassified traffic',
     from:'From', to:'To', showTraffic:'Show traffic →', quickSelect:'Quick select', hour1:'1 hour', hours24:'24 hours', days3:'3 days', days7:'7 days', days30:'30 days', timezone:'Time zone: Europe/Prague',
     intervalHint:'Set any custom From–To interval within the last 30 days.', checkingHistory:'Checking available history…',
     notice:'Firewall and web proxy are separate measurements. Their volumes are not added together because the same traffic may appear in both.', unknownNote:'{n} records do not distinguish Internet from Private Access.', missingNote:'{n} records are missing a byte counter; totals include only available values.',
@@ -144,8 +144,8 @@ function translateError(message){
     'Nepovolený původ požadavku':'Request origin not allowed',
   };
   if(exact[message]) return exact[message];
-  const invalid=message.match(/^Neplatná položka IP filtru: (.*?)\. Použij IP, CIDR nebo vzestupný rozsah dvou úplných adres\.$/s);
-  if(invalid) return 'Invalid IP filter item: '+invalid[1]+'. Use an IP, CIDR or an ascending range of two full addresses.';
+  const invalid=message.match(/^Neplatná položka IP filtru: (.*?)\. Použij IP, CIDR[^\n]*\.$/s);
+  if(invalid) return 'Invalid IP filter item: '+invalid[1]+'. Use an IP, CIDR, a full address range or IPv4 octet ranges (e.g. 10-11.30-33.1-2.3-50).';
   return message.replace(/^Chybí povinné sloupce v (.+) logu$/, 'Required columns are missing in the $1 log')
     .replace(/^Nepodporovaný počet CSV sloupců: /,'Unsupported CSV column count: ')
     .replace(/^Připojení k S3 selhalo \(curl /,'S3 connection failed (curl ');
