@@ -744,7 +744,7 @@ def transfers(params, database=None):
     sort = {'latest':'time','volume':'total'}.get(params.get('sort','latest'),params.get('sort','time'))
     direction = params.get('direction','desc' if sort in ['time','received','sent','total'] else 'asc')
     destination_view = params.get('destinationView','ip')
-    if sort not in TRANSFER_SORTS or direction not in ['asc','desc'] or destination_view not in ['ip','url']:
+    if sort not in TRANSFER_SORTS or direction not in ['asc','desc'] or destination_view not in ['ip','url','server']:
         raise ValueError('transferInvalidPage')
     where = ['e.source=?','e.ts>=?','e.ts<?','e.ip=?']
     values = [source, start.timestamp(), end.timestamp(), ip]
@@ -777,7 +777,9 @@ def transfers(params, database=None):
         totals = db.execute('SELECT COUNT(*) AS records,COALESCE(SUM(e.sent),0) AS sent,COALESCE(SUM(e.received),0) AS received,SUM(e.sent IS NULL OR e.received IS NULL) AS missing,COUNT(d.file) AS detailed'+join, values).fetchone()
         db.create_function('CSA_IP_SORT',1,transfer_destination_sort,deterministic=True)
         field = lambda name: "NULLIF(json_extract(d.details,'$.fields."+name+"'),'')"
-        destination_fields = ['url','servername','fqdns','destinationip'] if destination_view == 'url' else ['destinationip','hostname','servername','fqdns']
+        destination_fields = {'url':['url','servername','fqdns','destinationip'],
+                              'server':['servername','fqdns','destinationip'],
+                              'ip':['destinationip','hostname','servername','fqdns']}[destination_view]
         destination = 'CSA_IP_SORT(COALESCE('+','.join(field(k) for k in destination_fields)+'))'
         protocol = 'COALESCE('+field('protocol')+','+field('requestmethod')+')'
         protocol_label = "CASE "+protocol+" WHEN '6' THEN 'TCP (6)' WHEN '17' THEN 'UDP (17)' WHEN '1' THEN 'ICMP (1)' WHEN '58' THEN 'ICMPv6 (58)' ELSE "+protocol+' END'

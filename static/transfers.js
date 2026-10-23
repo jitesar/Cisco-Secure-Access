@@ -6,7 +6,7 @@ function closeTransfers(){if($('#transfers-dialog').open)$('#transfers-dialog').
 function openTransfers(ip){
   if(!current||loading)return;
   const query=new URLSearchParams(current.query);query.set('ip',ip);query.set('revision',current.revision||'0');
-  transferState={query,ip,page:1,sort:'time',direction:'desc',destinationView:query.get('source')==='proxy'?'url':'ip',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
+  transferState={query,ip,page:1,sort:'time',direction:'desc',destinationView:query.get('source')==='proxy'?'server':'ip',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
   $('#transfers-dialog').showModal();fetchTransfers();
 }
 async function fetchTransfers(){
@@ -30,7 +30,7 @@ function transferFieldValue(key,value){
 function transferDestination(item,view){
   const missing=item.available?t('transferMissingValue'):t('transferNotLoaded');
   const ip=item.destination?(item.destination.includes(':')?'['+item.destination+']':item.destination)+(item.port?':'+item.port:''):'';
-  if(view==='url')return item.url||item.servername||item.fqdns||ip||missing;
+  if(view==='server')return item.servername||item.fqdns||ip||missing;
   const address=ip||item.hostname||missing;
   return address+(ip&&item.hostname?'\n'+item.hostname:'');
 }
@@ -56,7 +56,7 @@ function renderTransfers(){
   $('#transfers-context').textContent=t(q.get('source')==='proxy'?'proxy':'firewall')+' · '+transferTime(new Date(q.get('from')).getTime()/1000)+' - '+transferTime(new Date(q.get('to')).getTime()/1000)+' · '+timeZone+'\n'+t('trafficType')+': '+t(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])+(q.get('subnet')?' · '+t('csvIP')+': '+q.get('subnet'):'')+(q.get('identity')?' · '+t('identity')+': '+q.get('identity'):'');
   $('#transfers-destination-view').value=state.destinationView;$('#transfers-destination-view').disabled=state.busy;
   const destinationLabel=document.querySelector('[data-transfer-sort="destination"] [data-i18n]');
-  destinationLabel.dataset.i18n=state.destinationView==='url'?'transferDestinationURL':'transferDestination';destinationLabel.textContent=t(destinationLabel.dataset.i18n);
+  destinationLabel.dataset.i18n=state.destinationView==='server'?'transferDestinationServer':'transferDestination';destinationLabel.textContent=t(destinationLabel.dataset.i18n);
   for(const button of document.querySelectorAll('[data-transfer-sort]')){
     const active=button.dataset.transferSort===state.sort, next=active?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(button.dataset.transferSort);
     button.disabled=state.busy;button.classList.toggle('active',active);button.closest('th').setAttribute('aria-sort',active?(state.direction==='asc'?'ascending':'descending'):'none');

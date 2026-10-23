@@ -224,6 +224,28 @@ class TrafficTests(unittest.TestCase):
             self.assertEqual(items[-1]['url'],'')
             self.assertEqual(items[-1]['servername'],'')
 
+    def test_server_name_view_overrides_url_and_proxy_and_sorts_all_pages(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        fields=[{'servername':f'server-{64-i:02d}.example','url':f'https://url-{i:02d}.example/path',
+                 'hostname':f'proxy-{i:02d}.internal','destinationip':'192.0.2.1'} for i in range(65)]
+        fields += [{'url':'https://ignored.example','hostname':'proxy.internal'},
+                   {'fqdns':'fqdn.example','url':'https://ignored.example'},
+                   {'destinationip':'192.0.2.2','url':'https://ignored.example'}]
+        with app.connect() as db:
+            for i,detail in enumerate(fields):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('servers',i,'proxy',epoch,'10.1.2.3','[]',1,2,'unknown'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('servers',i,json.dumps({'fields':detail,'truncated':[]})))
+        params={'source':'proxy','from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3','sort':'destination','destinationView':'server'}
+        names=[f'server-{i:02d}.example' for i in range(65)]
+        for direction in ['asc','desc']:
+            pages=[app.transfers({**params,'direction':direction,'page':str(page)}) for page in [1,2]]
+            items=[item for page in pages for item in page['items']]
+            expected=['192.0.2.2']+['fqdn.example']+names
+            if direction=='desc':expected.reverse()
+            expected.append('')
+            self.assertEqual([item['servername'] or item['fqdns'] or item['destination'] for item in items],expected)
+            self.assertEqual(pages[0]['destinationView'],'server')
+
     def test_destination_ports_are_numeric_and_detail_changes_invalidate_text_sort(self):
         epoch=app.timestamp('2026-10-22T12:00:00Z')
         with app.connect() as db:
