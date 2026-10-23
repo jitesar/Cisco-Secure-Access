@@ -70,6 +70,8 @@ The **Top source IP addresses** table supports sorting its displayed top 20 addr
 
 Select a row or source IP in **Top source IP addresses** to open its individual log records. The detail panel preserves the displayed report's source, time interval, subnet/address filter, identity and traffic type. It shows 50 records per page. Select any column header to sort by time, destination, protocol/method, action, received bytes, sent bytes or total bytes. Select the same header again to reverse direction. The active column shows an arrow indicating the sort direction. Sorting applies to the full filtered result before pagination. IP addresses and destination ports use numeric ordering; missing values remain last in both directions.
 
+**Display destination** switches between **Destination URL / server** and **IP / hostname**. Web proxy lists open in URL mode, showing the recorded URL first, then Server Name, FQDNs or the destination IP if unavailable. The proxy Hostname is excluded in URL mode. Sorting the destination header follows the selected display mode across all pages.
+
 Select a record's timestamp or row to expand it. The panel shows identities, exact counters and the available original fields, including destination IP/port, protocol or HTTP method, action, rule IDs and session timestamps. Proxy records can also include hostname, URL and HTTP status. Missing fields are explicitly marked; each row is a log record rather than an individual packet.
 
 ![Transfer drill-down showing sortable records and expanded web proxy log details](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-transfer-details.png)

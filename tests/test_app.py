@@ -191,6 +191,39 @@ class TrafficTests(unittest.TestCase):
         for changes in [{'direction':'DESC; DROP TABLE events'},{'sort':'destination;DELETE'},{'direction':'sideways'}]:
             self.assertRaises(ValueError,app.transfers,{**params,**changes})
 
+    def test_destination_url_view_sorts_before_pagination_and_ignores_proxy_hostname(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        with app.connect() as db:
+            for i in range(65):
+                fields={'url':f'https://site-{64-i:02d}.example/path','servername':'actual.example',
+                        'hostname':f'proxy-{i:02d}.internal','destinationip':'192.0.2.1'}
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('urls',i,'proxy',epoch,'10.1.2.3','[]',1,2,'unknown'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('urls',i,json.dumps({'fields':fields,'truncated':[]})))
+        params={'source':'proxy','from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3','sort':'destination','destinationView':'url'}
+        for direction in ['asc','desc']:
+            pages=[app.transfers({**params,'direction':direction,'page':str(page)}) for page in [1,2]]
+            items=[item for page in pages for item in page['items']]
+            expected=sorted([f'https://site-{i:02d}.example/path' for i in range(65)],reverse=direction=='desc')
+            self.assertEqual([item['url'] for item in items],expected)
+            self.assertEqual(items[0]['servername'],'actual.example')
+            self.assertEqual(pages[0]['destinationView'],'url')
+        self.assertRaises(ValueError,app.transfers,{**params,'destinationView':'url; DROP TABLE events'})
+
+    def test_destination_url_fallbacks_and_missing_values(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        fields=[{'hostname':'proxy.internal'}, {'servername':'b.example','hostname':'proxy.internal'},
+                {'fqdns':'a.example'}, {'destinationip':'192.0.2.2'}, {'url':'https://c.example','servername':'ignored.example'}]
+        with app.connect() as db:
+            for i,detail in enumerate(fields):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('fallback',i,'proxy',epoch,'10.1.2.3','[]',1,2,'unknown'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('fallback',i,json.dumps({'fields':detail,'truncated':[]})))
+        params={'source':'proxy','from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3','sort':'destination','destinationView':'url'}
+        for direction,expected in [('asc',[4,3,2,5,1]),('desc',[5,2,3,4,1])]:
+            items=app.transfers({**params,'direction':direction})['items']
+            self.assertEqual([item['id'] for item in items],expected)
+            self.assertEqual(items[-1]['url'],'')
+            self.assertEqual(items[-1]['servername'],'')
+
     def test_destination_ports_are_numeric_and_detail_changes_invalidate_text_sort(self):
         epoch=app.timestamp('2026-10-22T12:00:00Z')
         with app.connect() as db:

@@ -6,13 +6,13 @@ function closeTransfers(){if($('#transfers-dialog').open)$('#transfers-dialog').
 function openTransfers(ip){
   if(!current||loading)return;
   const query=new URLSearchParams(current.query);query.set('ip',ip);query.set('revision',current.revision||'0');
-  transferState={query,ip,page:1,sort:'time',direction:'desc',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
+  transferState={query,ip,page:1,sort:'time',direction:'desc',destinationView:query.get('source')==='proxy'?'url':'ip',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
   $('#transfers-dialog').showModal();fetchTransfers();
 }
 async function fetchTransfers(){
   const state=transferState;if(!state)return;
   const sequence=++state.sequence;state.busy=true;state.failure='';state.sortStale=false;state.expanded.clear();state.details.clear();renderTransfers();
-  const query=new URLSearchParams(state.query);query.set('page',state.page);query.set('sort',state.sort);query.set('direction',state.direction);if(state.page>1&&state.detailsRevision!==null)query.set('detailsRevision',state.detailsRevision);
+  const query=new URLSearchParams(state.query);query.set('page',state.page);query.set('sort',state.sort);query.set('direction',state.direction);query.set('destinationView',state.destinationView);if(state.page>1&&state.detailsRevision!==null)query.set('detailsRevision',state.detailsRevision);
   try{const data=await api('/api/transfers?'+query);if(transferState!==state||sequence!==state.sequence)return;state.data=data;state.detailsRevision=data.detailsRevision}
   catch(e){if(transferState!==state||sequence!==state.sequence)return;state.data=null;state.failure=e.message}
   finally{if(transferState===state&&sequence===state.sequence){state.busy=false;renderTransfers()}}
@@ -27,6 +27,13 @@ function transferFieldValue(key,value){
     if(Number.isFinite(+date))return displayTimestamp(date);
   }return value;
 }
+function transferDestination(item,view){
+  const missing=item.available?t('transferMissingValue'):t('transferNotLoaded');
+  const ip=item.destination?(item.destination.includes(':')?'['+item.destination+']':item.destination)+(item.port?':'+item.port:''):'';
+  if(view==='url')return item.url||item.servername||item.fqdns||ip||missing;
+  const address=ip||item.hostname||missing;
+  return address+(ip&&item.hostname?'\n'+item.hostname:'');
+}
 function transferDL(entries){
   const list=document.createElement('dl');list.className='transfer-fields';
   for(const [label,value] of entries){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=String(value);list.append(dt,dd)}return list;
@@ -38,7 +45,7 @@ async function toggleTransfer(item){
   if(state.details.has(item.id))return;
   state.details.set(item.id,{busy:true});
   const query=new URLSearchParams(state.query);query.set('event',item.id);query.set('eventRevision',item.eventRevision);query.set('hydrate','1');
-  try{const detail=await api('/api/transfers?'+query);if(transferState!==state)return;state.details.set(item.id,{data:detail});if(['destination','protocol','action'].includes(state.sort)&&detail.detailsRevision!==state.detailsRevision)state.sortStale=true;if(detail.available){const f=detail.fields;item.available=true;item.destination=f.destinationip||'';item.port=f.destinationport||'';item.hostname=(f.hostname||f.servername||f.fqdns||'').slice(0,500);item.protocol=f.protocol||f.requestmethod||'';item.action=f.action||''}}
+  try{const detail=await api('/api/transfers?'+query);if(transferState!==state)return;state.details.set(item.id,{data:detail});if(['destination','protocol','action'].includes(state.sort)&&detail.detailsRevision!==state.detailsRevision)state.sortStale=true;if(detail.available){const f=detail.fields;item.available=true;item.url=f.url||'';item.servername=f.servername||'';item.fqdns=f.fqdns||'';item.destination=f.destinationip||'';item.port=f.destinationport||'';item.hostname=(f.hostname||f.servername||f.fqdns||'').slice(0,500);item.protocol=f.protocol||f.requestmethod||'';item.action=f.action||''}}
   catch(e){if(transferState!==state)return;state.details.set(item.id,{failure:e.message});if(['transfersChanged','transferUnavailable'].includes(e.message))state.failure=e.message}
   if(transferState===state)renderTransfers();
 }
@@ -47,6 +54,9 @@ function renderTransfers(){
   const q=state.query, data=state.data;
   $('#transfers-title').textContent=t('transferTitle',{ip:state.ip||t('unknownIP')});
   $('#transfers-context').textContent=t(q.get('source')==='proxy'?'proxy':'firewall')+' · '+transferTime(new Date(q.get('from')).getTime()/1000)+' - '+transferTime(new Date(q.get('to')).getTime()/1000)+' · '+timeZone+'\n'+t('trafficType')+': '+t(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])+(q.get('subnet')?' · '+t('csvIP')+': '+q.get('subnet'):'')+(q.get('identity')?' · '+t('identity')+': '+q.get('identity'):'');
+  $('#transfers-destination-view').value=state.destinationView;$('#transfers-destination-view').disabled=state.busy;
+  const destinationLabel=document.querySelector('[data-transfer-sort="destination"] [data-i18n]');
+  destinationLabel.dataset.i18n=state.destinationView==='url'?'transferDestinationURL':'transferDestination';destinationLabel.textContent=t(destinationLabel.dataset.i18n);
   for(const button of document.querySelectorAll('[data-transfer-sort]')){
     const active=button.dataset.transferSort===state.sort, next=active?(state.direction==='asc'?'desc':'asc'):defaultTransferDirection(button.dataset.transferSort);
     button.disabled=state.busy;button.classList.toggle('active',active);button.closest('th').setAttribute('aria-sort',active?(state.direction==='asc'?'ascending':'descending'):'none');
@@ -69,10 +79,7 @@ function renderTransfers(){
   for(const item of data.items){
     const tr=document.createElement('tr');tr.className='transfer-row';
     const first=document.createElement('td'),button=document.createElement('button');button.className='transfer-link';button.type='button';button.dataset.transferId=item.id;button.textContent=(state.expanded.has(item.id)?'▾ ':'▸ ')+transferTime(item.ts);button.setAttribute('aria-expanded',String(state.expanded.has(item.id)));if(state.expanded.has(item.id))button.setAttribute('aria-controls','transfer-detail-'+item.id);button.setAttribute('aria-label',t('transferExpand',{time:transferTime(item.ts)}));button.addEventListener('click',()=>toggleTransfer(item));first.append(button);tr.append(first);
-    const missing=item.available?t('transferMissingValue'):t('transferNotLoaded');
-    const address=item.destination||item.hostname;
-    const destination=address?(address.includes(':')?'['+address+']':address)+(item.port?':'+item.port:''):missing;
-    for(const value of [destination+(item.destination&&item.hostname?'\n'+item.hostname:''),transferProtocol(item.protocol),item.action||'—',transferBytes(item.received),transferBytes(item.sent),transferTotal(item)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}
+    for(const value of [transferDestination(item,state.destinationView),transferProtocol(item.protocol),item.action||'—',transferBytes(item.received),transferBytes(item.sent),transferTotal(item)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}
     tr.addEventListener('click',e=>{if(!e.target.closest('button'))toggleTransfer(item)});tbody.append(tr);
     if(!state.expanded.has(item.id))continue;
     const detailRow=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.className='transfer-detail';cell.id='transfer-detail-'+item.id;
@@ -97,6 +104,7 @@ function changeTransferSort(key){
 function initializeTransfers(){
 $('#transfers-close').addEventListener('click',closeTransfers);
 $('#transfers-dialog').addEventListener('close',()=>{transferState=null});
+$('#transfers-destination-view').addEventListener('change',()=>{const state=transferState;if(!state||state.busy)return;state.destinationView=$('#transfers-destination-view').value;state.page=1;fetchTransfers()});
 for(const button of document.querySelectorAll('[data-transfer-sort]'))button.addEventListener('click',()=>changeTransferSort(button.dataset.transferSort));
 $('#transfers-refresh-sort').addEventListener('click',()=>{if(transferState){transferState.page=1;fetchTransfers()}});
 $('#transfers-previous').addEventListener('click',()=>{if(transferState){transferState.page--;fetchTransfers()}});

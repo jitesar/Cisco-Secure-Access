@@ -743,7 +743,8 @@ def transfers(params, database=None):
         raise ValueError('transferInvalidPage') from None
     sort = {'latest':'time','volume':'total'}.get(params.get('sort','latest'),params.get('sort','time'))
     direction = params.get('direction','desc' if sort in ['time','received','sent','total'] else 'asc')
-    if sort not in TRANSFER_SORTS or direction not in ['asc','desc']:
+    destination_view = params.get('destinationView','ip')
+    if sort not in TRANSFER_SORTS or direction not in ['asc','desc'] or destination_view not in ['ip','url']:
         raise ValueError('transferInvalidPage')
     where = ['e.source=?','e.ts>=?','e.ts<?','e.ip=?']
     values = [source, start.timestamp(), end.timestamp(), ip]
@@ -776,7 +777,8 @@ def transfers(params, database=None):
         totals = db.execute('SELECT COUNT(*) AS records,COALESCE(SUM(e.sent),0) AS sent,COALESCE(SUM(e.received),0) AS received,SUM(e.sent IS NULL OR e.received IS NULL) AS missing,COUNT(d.file) AS detailed'+join, values).fetchone()
         db.create_function('CSA_IP_SORT',1,transfer_destination_sort,deterministic=True)
         field = lambda name: "NULLIF(json_extract(d.details,'$.fields."+name+"'),'')"
-        destination = 'CSA_IP_SORT(COALESCE('+','.join(field(k) for k in ['destinationip','hostname','servername','fqdns'])+'))'
+        destination_fields = ['url','servername','fqdns','destinationip'] if destination_view == 'url' else ['destinationip','hostname','servername','fqdns']
+        destination = 'CSA_IP_SORT(COALESCE('+','.join(field(k) for k in destination_fields)+'))'
         protocol = 'COALESCE('+field('protocol')+','+field('requestmethod')+')'
         protocol_label = "CASE "+protocol+" WHEN '6' THEN 'TCP (6)' WHEN '17' THEN 'UDP (17)' WHEN '1' THEN 'ICMP (1)' WHEN '58' THEN 'ICMPv6 (58)' ELSE "+protocol+' END'
         expressions = {'time':'e.ts','destination':destination,'protocol':'LOWER('+protocol_label+')','action':'LOWER('+field('action')+')',
@@ -785,7 +787,7 @@ def transfers(params, database=None):
         # Only allowlisted expressions/directions enter SQL. Unknown values stay
         # last in either direction; stable tie-breakers apply before pagination.
         order = expression+' IS NULL ASC,'+expression+' '+direction.upper()
-        if sort == 'destination':
+        if sort == 'destination' and destination_view == 'ip':
             port = field('destinationport')
             order += ','+port+' IS NULL ASC,CAST('+port+' AS INTEGER) '+direction.upper()
             order += ',LOWER(COALESCE('+','.join(field(k) for k in ['hostname','servername','fqdns'])+",'')) "+direction.upper()
@@ -797,10 +799,11 @@ def transfers(params, database=None):
         items.append({'id':row['event_id'],'eventRevision':transfer_revision(row),'ts':row['ts'],'ip':row['ip'],
                       'identities':json.loads(row['identities']),'sent':row['sent'],'received':row['received'],'scope':row['scope'],
                       'destination':detail.get('destinationip',''),'port':detail.get('destinationport',''),
+                      'url':detail.get('url',''),'servername':detail.get('servername',''),'fqdns':detail.get('fqdns',''),
                       'hostname':(detail.get('hostname') or detail.get('servername') or detail.get('fqdns',''))[:500],
                       'protocol':detail.get('protocol') or detail.get('requestmethod',''),'action':detail.get('action',''),
                       'available':bool(row['details'])})
-    return {'items':items,'totals':dict(totals),'page':page,'pageSize':50,'pages':max(1,(totals['records']+49)//50),'revision':revision,'detailsRevision':detail_revision,'sort':sort,'direction':direction}
+    return {'items':items,'totals':dict(totals),'page':page,'pageSize':50,'pages':max(1,(totals['records']+49)//50),'revision':revision,'detailsRevision':detail_revision,'sort':sort,'direction':direction,'destinationView':destination_view}
 
 
 def hydrate_transfer(params, database):
