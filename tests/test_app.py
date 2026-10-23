@@ -2,6 +2,7 @@ import csv
 import datetime as dt
 import gzip
 import io
+import ipaddress
 import json
 from pathlib import Path
 import sys
@@ -148,6 +149,63 @@ class TrafficTests(unittest.TestCase):
         for values in [{'page':'0'},{'page':'-1'},{'sort':'DROP TABLE events'},{'ip':'bad'},{'event':'NaN'}]:
             self.assertRaises(ValueError,app.transfers,{**params,**values})
 
+    def test_all_transfer_columns_sort_globally_before_pagination(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        addresses=['192.0.2.2','192.0.2.10','2001:db8::2','2001:db8::10',None]
+        protocols=['6','17','1','GET','POST',None]
+        records=[]
+        with app.connect() as db:
+            for i in range(125):
+                fields={} if i%10==0 else {'destinationip':addresses[i%5],'destinationport':str([443,80,5][i%3]),'protocol':protocols[i%6],'action':['ALLOW','block','warn'][i%3]}
+                fields={k:v for k,v in fields.items() if v is not None}
+                if not fields.get('destinationip') and i%10!=0: fields['hostname']='example.test'
+                sent=None if i%17==0 else i*7%113
+                received=None if i%19==0 else i*3%101
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('sort',i,'firewall',epoch+i,'10.1.2.3','[]',sent,received,'unknown'))
+                if fields: db.execute('INSERT INTO event_details VALUES (?,?,?)',('sort',i,json.dumps({'fields':fields,'truncated':[]})))
+                records.append({'id':i+1,'ts':epoch+i,'sent':sent,'received':received,'fields':fields})
+        def primary(record,column):
+            f=record['fields']
+            if column=='time': return record['ts']
+            if column in ['received','sent']: return record[column]
+            if column=='total': return None if record['sent'] is None and record['received'] is None else (record['sent'] or 0)+(record['received'] or 0)
+            if column=='action': return f.get('action','').lower() or None
+            if column=='protocol': return {'6':'TCP (6)','17':'UDP (17)','1':'ICMP (1)'}.get(f.get('protocol'),f.get('protocol','')).lower() or None
+            if not f.get('destinationip'):
+                return (7,f['hostname'],int(f['destinationport']),f['hostname']) if f.get('hostname') else None
+            address=ipaddress.ip_address(f['destinationip'])
+            return (address.version,int(address),int(f['destinationport']),'')
+        params={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3'}
+        for column in ['time','destination','protocol','action','received','sent','total']:
+            for direction in ['asc','desc']:
+                with self.subTest(column=column,direction=direction):
+                    base=sorted(records,key=lambda r:(r['ts'],r['id']),reverse=True)
+                    present=[r for r in base if primary(r,column) is not None]
+                    missing=[r for r in base if primary(r,column) is None]
+                    expected=sorted(present,key=lambda r:primary(r,column),reverse=direction=='desc')+missing
+                    pages=[app.transfers({**params,'sort':column,'direction':direction,'page':str(page)}) for page in range(1,4)]
+                    self.assertEqual([item['id'] for page in pages for item in page['items']],[r['id'] for r in expected])
+                    self.assertEqual(pages[0]['totals']['records'],125)
+                    self.assertEqual(pages[0]['sort'],column)
+                    self.assertEqual(pages[0]['direction'],direction)
+        for changes in [{'direction':'DESC; DROP TABLE events'},{'sort':'destination;DELETE'},{'direction':'sideways'}]:
+            self.assertRaises(ValueError,app.transfers,{**params,**changes})
+
+    def test_destination_ports_are_numeric_and_detail_changes_invalidate_text_sort(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        with app.connect() as db:
+            for i,port in enumerate(['443','80','5','']):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('ports',i,'firewall',epoch,'10.1.2.3','[]',1,1,'unknown'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('ports',i,json.dumps({'fields':{'destinationip':'192.0.2.1','destinationport':port},'truncated':[]})))
+        params={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3','sort':'destination'}
+        initial=app.transfers({**params,'direction':'asc'})
+        self.assertEqual([r['port'] for r in initial['items']],['5','80','443',''])
+        self.assertEqual([r['port'] for r in app.transfers({**params,'direction':'desc'})['items']],['443','80','5',''])
+        with app.connect() as db: db.execute("INSERT INTO metadata VALUES ('detailRevision','2')")
+        self.assertRaisesRegex(ValueError,'transferSortChanged',app.transfers,{**params,'detailsRevision':initial['detailsRevision']})
+        self.assertEqual(app.transfers({**params,'sort':'sent','detailsRevision':initial['detailsRevision']})['totals']['records'],4)
+        self.assertEqual(app.transfers(params)['detailsRevision'],'2')
+
     def test_proxy_details_and_field_limits(self):
         details=[]
         text='https://example.test/'+('a'*17000)
@@ -161,6 +219,17 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(fields['truncated'],['url'])
         self.assertEqual(len(fields['fields']['url']),16384)
         self.assertEqual(rows[0][6:9],(10,20,'internet'))
+
+    def test_proxy_sort_uses_method_and_hostname_when_ip_is_missing(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        with app.connect() as db:
+            for i,(method,host) in enumerate([('POST','b.example.test'),('GET','a.example.test'),('HEAD','')]):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('proxy-sort',i,'proxy',epoch,'10.1.2.3','[]',1,2,'internet'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('proxy-sort',i,json.dumps({'fields':{'requestmethod':method,'hostname':host},'truncated':[]})))
+        params={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3','source':'proxy'}
+        self.assertEqual([r['protocol'] for r in app.transfers({**params,'sort':'protocol','direction':'asc'})['items']],['GET','HEAD','POST'])
+        self.assertEqual([r['hostname'] for r in app.transfers({**params,'sort':'destination','direction':'asc'})['items']],['a.example.test','b.example.test',''])
+        self.assertEqual([r['hostname'] for r in app.transfers({**params,'sort':'destination','direction':'desc'})['items']],['b.example.test','a.example.test',''])
 
     def test_legacy_details_fetch_only_matching_source_file(self):
         key=app.PREFIX+'firewalllogs/2026-10-22/legacy.csv.gz'

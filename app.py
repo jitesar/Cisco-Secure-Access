@@ -686,6 +686,23 @@ def transfer_revision(row):
     return hashlib.sha256(json.dumps(values).encode()).hexdigest()
 
 
+def transfer_destination_sort(value):
+    if not value:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        address = ipaddress.ip_address(value)
+        return bytes([address.version])+address.packed
+    except ValueError:
+        return b'\x07'+value.casefold().encode('utf-8')
+
+
+TRANSFER_SORTS = {'time','destination','protocol','action','received','sent','total'}
+TRANSFER_DETAIL_SORTS = {'destination','protocol','action'}
+
+
 def transfers(params, database=None):
     source, start, end, subnet, ranges, identity, scope = report_selection(params)
     ip = params.get('ip')
@@ -703,8 +720,9 @@ def transfers(params, database=None):
             raise ValueError()
     except (ValueError, TypeError):
         raise ValueError('transferInvalidPage') from None
-    sort = params.get('sort', 'latest')
-    if sort not in ['latest','volume']:
+    sort = {'latest':'time','volume':'total'}.get(params.get('sort','latest'),params.get('sort','time'))
+    direction = params.get('direction','desc' if sort in ['time','received','sent','total'] else 'asc')
+    if sort not in TRANSFER_SORTS or direction not in ['asc','desc']:
         raise ValueError('transferInvalidPage')
     where = ['e.source=?','e.ts>=?','e.ts<?','e.ip=?']
     values = [source, start.timestamp(), end.timestamp(), ip]
@@ -722,6 +740,8 @@ def transfers(params, database=None):
         db.execute('BEGIN')
         revision = db.execute("SELECT value FROM metadata WHERE key='cacheRevision'").fetchone()
         revision = revision[0] if revision else '0'
+        detail_revision = db.execute("SELECT value FROM metadata WHERE key='detailRevision'").fetchone()
+        detail_revision = detail_revision[0] if detail_revision else '0'
         if params.get('revision', revision) != revision:
             raise ValueError('transfersChanged')
         if event is not None:
@@ -729,9 +749,26 @@ def transfers(params, database=None):
             if row is None or params.get('eventRevision') != transfer_revision(row):
                 raise ValueError('transferUnavailable')
             detail = json.loads(row['details']) if row['details'] else {'fields':{},'truncated':[]}
-            return {'fields':detail['fields'],'truncated':detail['truncated'],'available':bool(row['details'])}
+            return {'fields':detail['fields'],'truncated':detail['truncated'],'available':bool(row['details']),'detailsRevision':detail_revision}
+        if sort in TRANSFER_DETAIL_SORTS and params.get('detailsRevision',detail_revision) != detail_revision:
+            raise ValueError('transferSortChanged')
         totals = db.execute('SELECT COUNT(*) AS records,COALESCE(SUM(e.sent),0) AS sent,COALESCE(SUM(e.received),0) AS received,SUM(e.sent IS NULL OR e.received IS NULL) AS missing,COUNT(d.file) AS detailed'+join, values).fetchone()
-        order = 'COALESCE(e.sent,0)+COALESCE(e.received,0) DESC,e.ts DESC,e.rowid DESC' if sort == 'volume' else 'e.ts DESC,e.rowid DESC'
+        db.create_function('CSA_IP_SORT',1,transfer_destination_sort,deterministic=True)
+        field = lambda name: "NULLIF(json_extract(d.details,'$.fields."+name+"'),'')"
+        destination = 'CSA_IP_SORT(COALESCE('+','.join(field(k) for k in ['destinationip','hostname','servername','fqdns'])+'))'
+        protocol = 'COALESCE('+field('protocol')+','+field('requestmethod')+')'
+        protocol_label = "CASE "+protocol+" WHEN '6' THEN 'TCP (6)' WHEN '17' THEN 'UDP (17)' WHEN '1' THEN 'ICMP (1)' WHEN '58' THEN 'ICMPv6 (58)' ELSE "+protocol+' END'
+        expressions = {'time':'e.ts','destination':destination,'protocol':'LOWER('+protocol_label+')','action':'LOWER('+field('action')+')',
+                       'received':'e.received','sent':'e.sent','total':'CASE WHEN e.sent IS NULL AND e.received IS NULL THEN NULL ELSE COALESCE(e.sent,0)+COALESCE(e.received,0) END'}
+        expression = expressions[sort]
+        # Only allowlisted expressions/directions enter SQL. Unknown values stay
+        # last in either direction; stable tie-breakers apply before pagination.
+        order = expression+' IS NULL ASC,'+expression+' '+direction.upper()
+        if sort == 'destination':
+            port = field('destinationport')
+            order += ','+port+' IS NULL ASC,CAST('+port+' AS INTEGER) '+direction.upper()
+            order += ',LOWER(COALESCE('+','.join(field(k) for k in ['hostname','servername','fqdns'])+",'')) "+direction.upper()
+        order += ',e.ts DESC,e.rowid DESC'
         rows = db.execute('SELECT e.rowid AS event_id,e.*,d.details'+join+' ORDER BY '+order+' LIMIT 50 OFFSET ?', [*values,(page-1)*50]).fetchall()
     items = []
     for row in rows:
@@ -742,7 +779,7 @@ def transfers(params, database=None):
                       'hostname':(detail.get('hostname') or detail.get('servername') or detail.get('fqdns',''))[:500],
                       'protocol':detail.get('protocol') or detail.get('requestmethod',''),'action':detail.get('action',''),
                       'available':bool(row['details'])})
-    return {'items':items,'totals':dict(totals),'page':page,'pageSize':50,'pages':max(1,(totals['records']+49)//50),'revision':revision}
+    return {'items':items,'totals':dict(totals),'page':page,'pageSize':50,'pages':max(1,(totals['records']+49)//50),'revision':revision,'detailsRevision':detail_revision,'sort':sort,'direction':direction}
 
 
 def hydrate_transfer(params, database):
@@ -770,6 +807,7 @@ def hydrate_transfer(params, database):
                 raise ValueError('transfersChanged')
             db.executemany('INSERT OR REPLACE INTO event_details VALUES (?,?,?)', details)
             db.execute('INSERT OR REPLACE INTO detailed_files VALUES (?)', (row['file'],))
+            db.execute("INSERT INTO metadata VALUES ('detailRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
         return transfers(params, database)
     finally:
         RUNTIME_LOCK.release()
