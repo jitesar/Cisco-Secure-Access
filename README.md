@@ -6,7 +6,7 @@
 
 Local application, version 0.11, for analyzing traffic volumes from Cisco Secure Access logs exported to Amazon S3. Filter by subnet, IP range, address list or identity, select a time period within the last 30 days, and view upload/download totals and an hourly chart.
 
-![CSA Traffic dashboard showing subnet filters, traffic totals and an hourly chart](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.6/csa-traffic-dashboard.png)
+![CSA Traffic dashboard showing web proxy traffic, address ranges, saved filters, report exports and an hourly chart](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-dashboard.png)
 
 The application runs on your computer and reads your S3 logs. It requires Python 3.10+ and curl 7.75+ with `--aws-sigv4` support. There are no third-party Python or JavaScript dependencies. A current browser with Web Crypto support is required for encrypted configuration backups.
 
@@ -71,6 +71,8 @@ The **Top source IP addresses** table supports sorting its displayed top 20 addr
 Select a row or source IP in **Top source IP addresses** to open its individual log records. The detail panel preserves the displayed report's source, time interval, subnet/address filter, identity and traffic type. It shows 50 records per page. Select any column header to sort by time, destination, protocol/method, action, received bytes, sent bytes or total bytes. Select the same header again to reverse direction. The active column shows an arrow indicating the sort direction. Sorting applies to the full filtered result before pagination. IP addresses and destination ports use numeric ordering; missing values remain last in both directions.
 
 Select a record's timestamp or row to expand it. The panel shows identities, exact counters and the available original fields, including destination IP/port, protocol or HTTP method, action, rule IDs and session timestamps. Proxy records can also include hostname, URL and HTTP status. Missing fields are explicitly marked; each row is a log record rather than an individual packet.
+
+![Transfer drill-down showing sortable records and expanded web proxy log details](https://github.com/jitesar/Cisco-Secure-Access/releases/download/v0.11/csa-traffic-transfer-details.png)
 
 Older caches remain readable. Expanding an older record downloads only its source file from your configured S3 storage to backfill the available details. The application checks that the file still matches the cached records before attaching details. Normal synchronization skips unchanged files even if their details have not been cached yet. New or changed files include their details on import. S3 data is never changed.
 
