@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1220"><title>CSA · Přenosy dat</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/backup.js" defer></script><script src="/settings.js" defer></script><script src="/exports.js" defer></script><script src="/app.js" defer></script></head>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1220"><title>CSA · Přenosy dat</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/backup.js" defer></script><script src="/settings.js" defer></script><script src="/exports.js" defer></script><script src="/transfers.js" defer></script><script src="/app.js" defer></script></head>
 <body>
 <header><a class="brand" href="/">▥ <span>CSA<span class="brandlight"> / Traffic</span></span></a><div class="header-tools"><button type="button" id="open-settings" class="secondary" data-i18n="settingsButton">Nastavení S3</button><span class="local"><i></i><span data-i18n="local">Lokální aplikace · S3</span></span><div class="languages" role="group" aria-label="Jazyk / Language"><button type="button" data-lang="cs" lang="cs" aria-pressed="true">Čeština</button><button type="button" data-lang="en" lang="en" aria-pressed="false">English</button></div></div></header>
 <main>
@@ -61,5 +61,17 @@
     <div class="full settings-actions"><button id="settings-test" type="button" class="secondary" data-i18n="settingsTest">Otestovat spojení</button><button type="submit" id="settings-save" class="primary" data-i18n="settingsSave">Uložit a připojit</button></div>
   </fieldset></form>
   <p id="settings-message" class="settings-message" role="status" aria-live="polite" hidden></p>
+</dialog>
+<dialog id="transfers-dialog" aria-labelledby="transfers-title" aria-describedby="transfers-context">
+  <div class="settings-head"><div><p class="eyebrow">CISCO SECURE ACCESS</p><h2 id="transfers-title"></h2></div><button id="transfers-close" type="button" class="settings-close" data-i18n-aria="transferClose" aria-label="Zavřít přenosy">×</button></div>
+  <p id="transfers-context"></p>
+  <div class="transfer-controls"><label><span data-i18n="transferSort">Řazení přenosů</span><select id="transfers-sort"><option value="latest" data-i18n="transferLatest">Nejnovější</option><option value="volume" data-i18n="transferVolume">Největší objem</option></select></label><p data-i18n="transferListHint">Kliknutím na čas nebo řádek zobrazíš podrobnosti záznamu.</p></div>
+  <p id="transfers-status" role="status" aria-live="polite"></p>
+  <p id="transfers-legacy" class="transfer-note" data-i18n="transferLegacy" hidden>Starší cache neobsahuje všechny podrobnosti. Doplň je tlačítkem Načíst nové logy.</p>
+  <p id="transfers-missing" class="transfer-note" data-i18n="transferMissingNote" hidden></p>
+  <button id="transfers-refresh" type="button" class="secondary" data-i18n="transferRefresh" hidden>Obnovit report</button>
+  <div class="tablewrap"><table class="transfers-table"><thead><tr><th data-i18n="transferTime">Čas (Europe/Prague)</th><th data-i18n="transferDestination">Cíl</th><th data-i18n="transferProtocol">Protokol / metoda</th><th data-i18n="transferAction">Akce</th><th data-i18n="received">Přijato</th><th data-i18n="sent">Odesláno</th><th data-i18n="totalColumn">Celkem</th></tr></thead><tbody id="transfers-rows"></tbody></table></div>
+  <div class="transfer-pagination"><button type="button" id="transfers-previous" class="secondary" data-i18n="transferPrevious">Předchozí</button><span id="transfers-page"></span><button type="button" id="transfers-next" class="secondary" data-i18n="transferNext">Další</button></div>
+  <p class="transfer-note" data-i18n="transferRecordNote">Jeden řádek odpovídá jednomu logovému záznamu, nikoliv jednotlivému paketu. Součty se řídí Timestamp v logu.</p>
 </dialog>
 </body></html>

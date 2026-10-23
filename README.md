@@ -60,6 +60,16 @@ Separate entries with commas, semicolons, spaces or newlines. Both range endpoin
 
 Subnet filters match source IP addresses recorded in the logs. NAT may hide the original subnet. Text identity labels are preserved as a whole; JSON identity arrays are split into individual entries. The application does not currently retrieve AD/Entra group membership.
 
+### Explore individual transfers
+
+Select a row or source IP in **Top source IP addresses** to open its individual log records. The detail panel preserves the displayed report's source, time interval, subnet/address filter, identity and traffic type. It shows 50 records per page, with **Newest first** and **Largest volume** sorting.
+
+Select a record's timestamp or row to expand it. The panel shows identities, exact counters and the available original fields, including destination IP/port, protocol or HTTP method, action, rule IDs and session timestamps. Proxy records can also include hostname, URL and HTTP status. Missing fields are explicitly marked; each row is a log record rather than an individual packet.
+
+Older caches remain readable. Expanding an older record downloads only its source file from your configured S3 storage to backfill the available details. The application checks that the file still matches the cached records before attaching details. **Load new logs** also backfills details for existing files during the next import. S3 data is never changed.
+
+If the cache changes during browsing, refresh the main report before reopening the transfers. This prevents combining pages from different cache versions. Source-file paths and customer S3 prefixes are not included in detail responses. Fields longer than 16,384 characters are explicitly marked as truncated. Detailed fields, including URLs and identities, are stored in the local cache and should be treated as private report data.
+
 ### Measurement details
 
 Firewall and proxy totals are **kept separate** because they measure different layers and may represent the same traffic.

@@ -92,6 +92,103 @@ class TrafficTests(unittest.TestCase):
         data = app.parse_log(self.blob([proxy]), 'proxy', 'old-proxy')
         self.assertEqual(data[0][6:8], (10,20))
 
+    def test_transfer_details_fields_and_filter_intersection(self):
+        details = []
+        rows = app.parse_log(self.blob([
+            ['Timestamp','Source IP','Bytes Sent','Bytes Received','Identities','Private Flow','Destination IP','Destination Port','Protocol','Action','Rule ID'],
+            ['2026-10-22 12:30:00','10.1.2.3','10','20','["A","B"]','TRUE','192.0.2.1','443','TCP','allow','rule-1'],
+            ['2026-10-22 12:31:00','10.1.2.3','500','600','["Other"]','FALSE','192.0.2.2','80','TCP','allow','rule-2'],
+            ['2026-10-22 13:00:00','10.1.2.3','1000','2000','["B"]','TRUE','192.0.2.3','443','TCP','allow','rule-3'],
+        ]), 'firewall','private-tenant/key',details)
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)', rows)
+            db.executemany('INSERT INTO event_details VALUES (?,?,?)', details)
+        params = {'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','subnet':'10.1.0.0/16','identity':'B','scope':'private','ip':'10.1.2.3'}
+        data = app.transfers(params)
+        self.assertEqual(data['totals']['records'],1)
+        self.assertEqual(data['totals']['sent'],app.report(params)['totals']['sent'])
+        self.assertEqual(data['items'][0]['destination'],'192.0.2.1')
+        self.assertEqual(data['items'][0]['port'],'443')
+        self.assertNotIn('private-tenant',json.dumps(data))
+        item = data['items'][0]
+        detail = app.transfers({**params,'event':str(item['id']),'eventRevision':item['eventRevision']})
+        self.assertEqual(detail['fields']['ruleid'],'rule-1')
+        self.assertEqual(detail['fields']['protocol'],'TCP')
+        self.assertEqual(app.transfers({**params,'identity':'Not B'})['totals']['records'],0)
+        self.assertEqual(app.transfers({**params,'subnet':'10.8.0.0/16'})['totals']['records'],0)
+        self.assertEqual(app.transfers({**params,'source':'proxy'})['totals']['records'],0)
+        self.assertRaisesRegex(ValueError,'transferUnavailable',app.transfers,{**params,'ip':'10.9.0.1','event':str(item['id']),'eventRevision':item['eventRevision']})
+        self.assertRaisesRegex(ValueError,'transferUnavailable',app.transfers,{**params,'event':str(item['id']),'eventRevision':'bad'})
+        with app.connect() as db:
+            db.execute("INSERT INTO metadata VALUES ('cacheRevision','2')")
+        self.assertRaisesRegex(ValueError,'transfersChanged',app.transfers,{**params,'revision':'0'})
+
+    def test_transfer_pagination_sort_legacy_and_missing_counters(self):
+        epoch=app.timestamp('2026-10-22T12:00:00Z')
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',[
+                ('old',i,'firewall',epoch+i,'2001:db8::1','["Žluťoučký kůň"]',None if i==0 else i,0,'unknown') for i in range(105)
+            ])
+            db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('old',105,'firewall',epoch,'','[]',None,None,'unknown'))
+        params={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'2001:0db8::1'}
+        first=app.transfers(params)
+        second=app.transfers({**params,'page':'2'})
+        last=app.transfers({**params,'page':'3'})
+        self.assertEqual([len(p['items']) for p in [first,second,last]],[50,50,5])
+        self.assertEqual(first['pages'],3)
+        self.assertEqual(len({item['id'] for p in [first,second,last] for item in p['items']}),105)
+        self.assertEqual(first['totals']['detailed'],0)
+        self.assertEqual(first['totals']['missing'],1)
+        self.assertEqual(last['items'][-1]['sent'],None)
+        record=first['items'][0]
+        self.assertFalse(app.transfers({**params,'event':str(record['id']),'eventRevision':record['eventRevision']})['available'])
+        self.assertEqual(app.transfers({**params,'sort':'volume'})['items'][0]['sent'],104)
+        self.assertEqual(app.transfers({**params,'ip':''})['totals']['records'],1)
+        for values in [{'page':'0'},{'page':'-1'},{'sort':'DROP TABLE events'},{'ip':'bad'},{'event':'NaN'}]:
+            self.assertRaises(ValueError,app.transfers,{**params,**values})
+
+    def test_proxy_details_and_field_limits(self):
+        details=[]
+        text='https://example.test/'+('a'*17000)
+        rows=app.parse_log(self.blob([
+            ['Timestamp','Internal Client IP','Request Size','Response Size','URL','Request Method','Status Code','Destination IP','Authorization'],
+            ['2026-10-22 12:30:00','10.1.2.3','10','20',text,'GET','200','192.0.2.4','not-to-be-kept'],
+        ]),'proxy','proxy-key',details)
+        fields=json.loads(details[0][2])
+        self.assertNotIn('authorization',fields['fields'])
+        self.assertEqual(fields['fields']['requestmethod'],'GET')
+        self.assertEqual(fields['truncated'],['url'])
+        self.assertEqual(len(fields['fields']['url']),16384)
+        self.assertEqual(rows[0][6:9],(10,20,'internet'))
+
+    def test_legacy_details_fetch_only_matching_source_file(self):
+        key=app.PREFIX+'firewalllogs/2026-10-22/legacy.csv.gz'
+        def blob(sent='10'):
+            return self.blob([
+                ['Timestamp','Source IP','Bytes Sent','Bytes Received','Destination IP','Destination Port'],
+                ['2026-10-22 12:00:00','10.1.2.3',sent,'20','192.0.2.5','443'],
+            ])
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',app.parse_log(blob(),'firewall',key))
+            db.execute('INSERT INTO files VALUES (?,?,?)',(key,'old','now'))
+        params={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.2.3'}
+        item=app.transfers(params)['items'][0]
+        params.update(event=str(item['id']),eventRevision=item['eventRevision'])
+        with patch.object(app,'ACTIVE_SETTINGS',{'configured':True}), patch.object(app,'S3') as client:
+            client.return_value.get.return_value=blob('11')
+            self.assertRaisesRegex(ValueError,'transfersChanged',app.hydrate_transfer,params,app.DB)
+            self.assertFalse(app.transfers(params)['available'])
+            client.return_value.get.return_value=blob()
+            result=app.hydrate_transfer(params,app.DB)
+            self.assertEqual(result['fields']['destinationip'],'192.0.2.5')
+            self.assertEqual(result['fields']['destinationport'],'443')
+            self.assertTrue(app.transfers(params)['available'])
+            client.return_value.get.assert_called_with(key)
+            count=client.return_value.get.call_count
+            app.hydrate_transfer(params,app.DB)
+            self.assertEqual(client.return_value.get.call_count,count)
+        self.assertEqual(app.report(params)['totals']['sent'],10)
+
     def test_reimport_is_idempotent_and_changed_file_replaces_rows(self):
         today = app.utc_now().date().isoformat()
         key = app.PREFIX + 'firewalllogs/' + today + '/sample.csv.gz'

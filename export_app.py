@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parent
 EXPORT_FILES=(
     'app.py','README.md','.gitignore','config.example.json','credentials.example.json',
     'Start.command','start.cmd','export_app.py',
-    'static/exports.js','static/backup.js','static/settings.js','static/index.html','static/app.js','static/i18n.js','static/style.css',
+    'static/transfers.js','static/exports.js','static/backup.js','static/settings.js','static/index.html','static/app.js','static/i18n.js','static/style.css',
     'tests/test_exports.js','tests/test_backup.js','tests/test_app.py',
 )
 

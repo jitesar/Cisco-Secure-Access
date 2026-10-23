@@ -317,6 +317,10 @@ def connect(database=None):
         file TEXT, rownum INTEGER, source TEXT, ts REAL, ip TEXT, identities TEXT,
         sent INTEGER, received INTEGER, scope TEXT, PRIMARY KEY(file,rownum));
       CREATE INDEX IF NOT EXISTS event_time ON events(source,ts);
+      CREATE INDEX IF NOT EXISTS event_ip_time ON events(source,ip,ts);
+      CREATE TABLE IF NOT EXISTS event_details (
+        file TEXT, rownum INTEGER, details TEXT NOT NULL, PRIMARY KEY(file,rownum));
+      CREATE TABLE IF NOT EXISTS detailed_files (key TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT);
     ''')
     try:
@@ -365,7 +369,10 @@ def identity_values(value):
     return [value]
 
 
-def parse_log(blob, source, key):
+DETAIL_FIELDS = set('timestamp direction protocol sourceip sourceport destinationip destinationport fqdns hostname servername action ruleid rulesetid firstpackettimestamp lastpackettimestamp packetssent packetsreceived bytessent bytesreceived destinationcountry sourcecountry awsregion datacenter appid applicationids applicationentityname privateappgroupid privateflow trafficsource internalclientip externalclientip requestmethod url statuscode contenttype requestsize responsesize responsebodysize identities policyidentitylabel identitytypes identitytype fwblockreason forwardingmethod egressip egress'.split())
+
+
+def parse_log(blob, source, key, details=None):
     with io.TextIOWrapper(gzip.GzipFile(fileobj=io.BytesIO(blob)), encoding='utf-8-sig', newline='') as stream:
         # Cisco v10 positional fields; only exact documented widths are accepted.
         positional = {
@@ -408,6 +415,11 @@ def parse_log(blob, source, key):
             scope = ('private' if flow == 'true' else 'internet' if flow == 'false' else 'unknown') if source == 'firewall' else 'internet'
             identities = identity_values(get('identities') or get('policyidentitylabel'))
             result.append((key, index, source, ts, ip, json.dumps(identities, ensure_ascii=False), sent, received, scope))
+            if details is not None:
+                fields = {name: value.strip() for name, value in row.items() if name in DETAIL_FIELDS and value.strip()}
+                truncated = [name for name, value in fields.items() if len(value) > 16384]
+                fields = {name: value[:16384] for name, value in fields.items()}
+                details.append((key, index, json.dumps({'fields': fields, 'truncated': truncated}, ensure_ascii=False)))
         return result
 
 
@@ -476,12 +488,18 @@ def ingest_unlocked():
         with connect() as db:
             for source, key, etag in files:
                 old = db.execute('SELECT etag FROM files WHERE key=?', (key,)).fetchone()
-                if not old or old['etag'] != etag:
-                    rows = parse_log(client.get(urllib.parse.quote(key, safe='/')), source, key)
+                detailed = db.execute('SELECT 1 FROM detailed_files WHERE key=?', (key,)).fetchone()
+                if not old or old['etag'] != etag or not detailed:
+                    details = []
+                    rows = parse_log(client.get(urllib.parse.quote(key, safe='/')), source, key, details)
                     with db:
                         db.execute('DELETE FROM events WHERE file=?', (key,))
+                        db.execute('DELETE FROM event_details WHERE file=?', (key,))
                         db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)', rows)
+                        db.executemany('INSERT INTO event_details VALUES (?,?,?)', details)
+                        db.execute('INSERT OR REPLACE INTO detailed_files VALUES (?)', (key,))
                         db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)', (key, etag, utc_now().isoformat()))
+                        db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
                 with LOCK:
                     STATE['processed'] += 1
             synced = utc_now().isoformat()
@@ -490,7 +508,10 @@ def ingest_unlocked():
                 db.execute('DELETE FROM events WHERE ts < ?', (cutoff,))
                 # Once rows have expired, their file must be eligible for a later reimport.
                 db.execute('DELETE FROM files WHERE key NOT IN (SELECT DISTINCT file FROM events)')
+                db.execute('DELETE FROM event_details WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.file=event_details.file AND e.rownum=event_details.rownum)')
+                db.execute('DELETE FROM detailed_files WHERE key NOT IN (SELECT key FROM files)')
                 db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)', ('lastSync', synced))
+                db.execute("INSERT INTO metadata VALUES ('cacheRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1")
             with LOCK:
                 STATE['lastSync'] = synced
     except Exception as error:
@@ -518,7 +539,7 @@ def start_sync():
         RUNTIME_LOCK.release()
 
 
-def report(params, database=None):
+def report_selection(params):
     source = params.get('source', 'firewall')
     if source not in ['firewall', 'proxy']:
         raise ValueError('Neplatný zdroj')
@@ -538,10 +559,17 @@ def report(params, database=None):
     scope = params.get('scope', 'all')
     if scope not in ['all', 'internet', 'private', 'unknown']:
         raise ValueError('Neplatný druh provozu')
+    return source, start, end, subnet, ranges, identity, scope
+
+
+def report(params, database=None):
+    source, start, end, subnet, ranges, identity, scope = report_selection(params)
     with connect(database) as db:
+        db.execute('BEGIN')
         rows = db.execute('SELECT * FROM events WHERE source=? AND ts>=? AND ts<? ORDER BY ts', (source, start.timestamp(), end.timestamp())).fetchall()
         bounds = db.execute('SELECT MIN(ts),MAX(ts),COUNT(*) FROM events WHERE source=?', (source,)).fetchone()
         last = db.execute("SELECT value FROM metadata WHERE key='lastSync'").fetchone()
+        revision = db.execute("SELECT value FROM metadata WHERE key='cacheRevision'").fetchone()
     buckets = {}
     cursor = int(start.timestamp() // 3600) * 3600
     while cursor < end.timestamp():
@@ -573,7 +601,102 @@ def report(params, database=None):
         item['sent'] += sent
         item['received'] += received
         item['records'] += 1
-    return {'totals': totals, 'series': list(buckets.values()), 'top': sorted(top.values(), key=lambda x: x['sent']+x['received'], reverse=True)[:20], 'identities': sorted(options), 'coverage': {'from': bounds[0], 'to': bounds[1], 'records': bounds[2]}, 'lastSync': last[0] if last else None, 'subnet': subnet or None}
+    return {'totals': totals, 'series': list(buckets.values()), 'top': sorted(top.values(), key=lambda x: x['sent']+x['received'], reverse=True)[:20], 'identities': sorted(options), 'coverage': {'from': bounds[0], 'to': bounds[1], 'records': bounds[2]}, 'lastSync': last[0] if last else None, 'subnet': subnet or None, 'revision': revision[0] if revision else '0'}
+
+
+def transfer_revision(row):
+    # Do not expose the S3 key/customer prefix; protect against reused SQLite row IDs.
+    values = [row[k] for k in ['file','rownum','source','ts','ip','identities','sent','received','scope']]
+    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
+
+
+def transfers(params, database=None):
+    source, start, end, subnet, ranges, identity, scope = report_selection(params)
+    ip = params.get('ip')
+    if ip is None:
+        raise ValueError('transferIPRequired')
+    if ip:
+        try:
+            ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            raise ValueError('transferIPRequired') from None
+    try:
+        page = int(params.get('page', '1'))
+        event = int(params['event']) if 'event' in params else None
+        if page < 1 or page > 1000000 or (event is not None and event < 1):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError('transferInvalidPage') from None
+    sort = params.get('sort', 'latest')
+    if sort not in ['latest','volume']:
+        raise ValueError('transferInvalidPage')
+    where = ['e.source=?','e.ts>=?','e.ts<?','e.ip=?']
+    values = [source, start.timestamp(), end.timestamp(), ip]
+    if not matches_ip(ip, ranges):
+        where.append('0')
+    if identity:
+        where.append('EXISTS(SELECT 1 FROM json_each(e.identities) j WHERE j.value=?)')
+        values.append(identity)
+    if scope != 'all':
+        where.append('e.scope=?')
+        values.append(scope)
+    condition = ' AND '.join(where)
+    join = ' FROM events e LEFT JOIN event_details d ON d.file=e.file AND d.rownum=e.rownum WHERE '+condition
+    with connect(database) as db:
+        db.execute('BEGIN')
+        revision = db.execute("SELECT value FROM metadata WHERE key='cacheRevision'").fetchone()
+        revision = revision[0] if revision else '0'
+        if params.get('revision', revision) != revision:
+            raise ValueError('transfersChanged')
+        if event is not None:
+            row = db.execute('SELECT e.rowid AS event_id,e.*,d.details'+join+' AND e.rowid=?', [*values,event]).fetchone()
+            if row is None or params.get('eventRevision') != transfer_revision(row):
+                raise ValueError('transferUnavailable')
+            detail = json.loads(row['details']) if row['details'] else {'fields':{},'truncated':[]}
+            return {'fields':detail['fields'],'truncated':detail['truncated'],'available':bool(row['details'])}
+        totals = db.execute('SELECT COUNT(*) AS records,COALESCE(SUM(e.sent),0) AS sent,COALESCE(SUM(e.received),0) AS received,SUM(e.sent IS NULL OR e.received IS NULL) AS missing,COUNT(d.file) AS detailed'+join, values).fetchone()
+        order = 'COALESCE(e.sent,0)+COALESCE(e.received,0) DESC,e.ts DESC,e.rowid DESC' if sort == 'volume' else 'e.ts DESC,e.rowid DESC'
+        rows = db.execute('SELECT e.rowid AS event_id,e.*,d.details'+join+' ORDER BY '+order+' LIMIT 50 OFFSET ?', [*values,(page-1)*50]).fetchall()
+    items = []
+    for row in rows:
+        detail = json.loads(row['details'])['fields'] if row['details'] else {}
+        items.append({'id':row['event_id'],'eventRevision':transfer_revision(row),'ts':row['ts'],'ip':row['ip'],
+                      'identities':json.loads(row['identities']),'sent':row['sent'],'received':row['received'],'scope':row['scope'],
+                      'destination':detail.get('destinationip',''),'port':detail.get('destinationport',''),
+                      'hostname':(detail.get('hostname') or detail.get('servername') or detail.get('fqdns',''))[:500],
+                      'protocol':detail.get('protocol') or detail.get('requestmethod',''),'action':detail.get('action',''),
+                      'available':bool(row['details'])})
+    return {'items':items,'totals':dict(totals),'page':page,'pageSize':50,'pages':max(1,(totals['records']+49)//50),'revision':revision}
+
+
+def hydrate_transfer(params, database):
+    """Backfill one existing source file on an explicit record-detail request."""
+    if not RUNTIME_LOCK.acquire(blocking=False):
+        raise ValueError('settingsBusy')
+    try:
+        if not ACTIVE_SETTINGS or Path(database).resolve() != Path(DB).resolve():
+            raise ValueError('transfersChanged')
+        # Validate the same filters, cache revision and record fingerprint again.
+        current = transfers(params, database)
+        if current['available']:
+            return current
+        with connect(database) as db:
+            row = db.execute('SELECT file,source FROM events WHERE rowid=?', (int(params['event']),)).fetchone()
+        if not row or not row['file'].startswith(PREFIX):
+            raise ValueError('transferUnavailable')
+        details = []
+        rows = parse_log(S3(CREDENTIALS).get(urllib.parse.quote(row['file'],safe='/')),row['source'],row['file'],details)
+        with connect(database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            existing = db.execute('SELECT * FROM events WHERE file=? ORDER BY rownum', (row['file'],)).fetchall()
+            # Never attach fields from a changed file to an older aggregate record.
+            if [tuple(r) for r in existing] != rows:
+                raise ValueError('transfersChanged')
+            db.executemany('INSERT OR REPLACE INTO event_details VALUES (?,?,?)', details)
+            db.execute('INSERT OR REPLACE INTO detailed_files VALUES (?)', (row['file'],))
+        return transfers(params, database)
+    finally:
+        RUNTIME_LOCK.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -605,14 +728,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, dict(STATE))
             if url.path == '/api/settings':
                 return self.send(200, public_settings())
-            if url.path == '/api/report':
+            if url.path in ['/api/report','/api/transfers']:
                 params = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query, keep_blank_values=True).items()}
                 with LOCK:
                     if not ACTIVE_SETTINGS:
                         return self.send(409, {'error':'setupRequired'})
                     database = DB
-                return self.send(200, report(params, database))
-            files = {'/exports.js': ('exports.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/settings.js': ('settings.js', 'text/javascript; charset=utf-8'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/i18n.js': ('i18n.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
+                data = (transfers if url.path == '/api/transfers' else report)(params, database)
+                if url.path == '/api/transfers' and 'event' in params and params.get('hydrate') == '1' and not data['available']:
+                    data = hydrate_transfer(params, database)
+                return self.send(200, data)
+            files = {'/transfers.js': ('transfers.js', 'text/javascript; charset=utf-8'), '/exports.js': ('exports.js', 'text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/settings.js': ('settings.js', 'text/javascript; charset=utf-8'), '/backup.js': ('backup.js', 'text/javascript; charset=utf-8'), '/i18n.js': ('i18n.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if url.path not in files:
                 return self.send(404, {'error': 'Nenalezeno'})
             name, mime = files[url.path]
