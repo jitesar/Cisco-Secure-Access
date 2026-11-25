@@ -167,7 +167,7 @@ $('#top-limit').addEventListener('change',()=>{
 });
 function renderTop(){
 const d=current,total=d.totals.sent+d.totals.received;
-$('#top-count').textContent=d.sourceCount==null?t('topRestart'):t('topCount',{shown:fmt.format(d.top.length),total:fmt.format(d.sourceCount)});
+$('#top-count').textContent=d.sourceCount==null?t('topRestart'):t(d.top.length===d.sourceCount?'topAllShown':'topCount',{shown:fmt.format(d.top.length),total:fmt.format(d.sourceCount)});
 for(const button of document.querySelectorAll('[data-top-sort]')){
   const active=button.dataset.topSort===topSort,next=active?(topDirection==='asc'?'desc':'asc'):(button.dataset.topSort==='ip'?'asc':'desc');
   button.classList.toggle('active',active);button.closest('th').setAttribute('aria-sort',active?(topDirection==='asc'?'ascending':'descending'):'none');
