@@ -13,6 +13,7 @@ function reportDocument(snapshot, translate, generated=new Date()) {
     [translate('csvIP'),q.get('subnet')||translate('allSources')],
     [translate('csvIdentity'),q.get('identity')||translate('allSources')],
     [translate('csvScope'),translate(({all:'allTraffic',internet:'internet',private:'private',unknown:'unknownTraffic'})[q.get('scope')])],
+    ...[['protocol',q.get('source')==='proxy'?'httpMethod':'networkProtocol'],['action','transferAction'],['destinationip','filterDestIP'],['destinationport','filterDestPort'],['servername','Server Name'],['ruleid','Rule ID']].filter(([key])=>q.get(key)).map(([key,label])=>[translate(label),q.get(key)]),
     [translate('csvFrom'),stamp(q.get('from'))],
     [translate('csvTo'),stamp(q.get('to'))],
     [translate('reportSynced'),snapshot.lastSync?stamp(snapshot.lastSync):translate('reportNotSynced')],
@@ -31,6 +32,14 @@ function reportDocument(snapshot, translate, generated=new Date()) {
     [translate('reportSessionNote')],
     [translate('reportPrecision')],
   ];
+  if(snapshot.classification){
+    rows.push([], [translate('classificationTitle')], [translate('classificationHint')],
+      [translate('trafficType'),translate('reportRecords'),translate('reportTotalBytes')]);
+    for(const [key,value] of Object.entries(snapshot.classification)){
+      const label=({internet:'confirmedInternet',private:'confirmedPrivate',unknown:'unknownTraffic'})[key]||key;
+      rows.push([translate(label),value.records,value.bytes]);
+    }
+  }
   if(!snapshot.coverage.records) rows.push([translate('noHistoryHint')]);
   else rows.push([translate(new Date(q.get('from')).getTime()<snapshot.coverage.from*1000?'partialHistory':'fullHistory')]);
   if(totals.missing)rows.push([translate('missingNote',{n:totals.missing})]);

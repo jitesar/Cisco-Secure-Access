@@ -15,7 +15,7 @@ const context={console,URLSearchParams,Date,Option:class {constructor(text,value
   document:{querySelector:()=>quick.classes.has('selected')?quick:null,querySelectorAll:selector=>selector==='[data-source]'?tabs:[quick]},
   window:{addEventListener(){}},localStorage:{getItem:key=>{if(readFail)throw Error('blocked');return memory.get(key)||null},setItem:(key,value)=>{if(writesFail)throw Error('quota');memory.set(key,value)}},
   params:()=>{if(queryError)throw Error(queryError);return new URLSearchParams({scope:get('#scope').value,subnet:get('#subnet').value,identity:get('#identity').value,from:'2026-10-22T10:00:00Z',to:'2026-10-23T10:00:00Z'})},
-  preset:hours=>{presetHours=hours;quick.classes.add('selected')},updateDateBounds(){},localValue:date=>date.toISOString().slice(0,16),load:async()=>{loads++},
+  preset:hours=>{presetHours=hours;quick.classes.add('selected')},updateDateBounds(){},refreshIntervalFields(){},localValue:date=>date.toISOString().slice(0,16),load:async()=>{loads++},
 };
 vm.createContext(context);vm.runInContext("let source='firewall';",context);vm.runInContext(fs.readFileSync('static/filters.js','utf8'),context);
 const run=script=>vm.runInContext(script,context),snapshot=()=>JSON.parse(memory.get('csa-saved-filters-v1'));

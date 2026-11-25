@@ -1,5 +1,10 @@
 'use strict';
 const SAVED_FILTERS_KEY='csa-saved-filters-v1';
+const connectionFields=['protocol','action','destinationip','destinationport','servername','ruleid'];
+let activeConnectionFilters={};
+function cleanConnectionFilters(values){
+  return Object.fromEntries(connectionFields.filter(key=>typeof values?.[key]==='string'&&values[key]).map(key=>[key,values[key].slice(0,255)]));
+}
 let savedFilters=[],savedFilterMessage='';
 function validateSavedFilters(value){
   if(!Array.isArray(value)||value.length>100)throw Error('savedFiltersInvalid');
@@ -16,7 +21,7 @@ function validateSavedFilters(value){
   return value;
 }
 function copySavedFilters(value){
-  return validateSavedFilters(value).map(({name,source,mode,scope,subnet,identity,hours,from,to})=>({name,source,mode,scope,subnet,identity,hours,from,to}));
+  return validateSavedFilters(value).map(({name,source,mode,scope,subnet,identity,hours,from,to,connections})=>({name,source,mode,scope,subnet,identity,hours,from,to,...(connections?{connections:cleanConnectionFilters(connections)}:{})}));
 }
 function readSavedFilters(){
   try{const raw=localStorage.getItem(SAVED_FILTERS_KEY);return copySavedFilters(raw?JSON.parse(raw):[])}catch(_){throw Error('savedFiltersStorageRead')}
@@ -60,7 +65,7 @@ function saveSearchFilter(){
   try{
     const name=$('#saved-filter-name').value.trim();if(!name||name.length>80)throw Error('savedFilterNameRequired');
     const query=params(),quick=document.querySelector('[data-hours].selected');
-    const item={name,source,mode:$('#mode').value,scope:query.get('scope'),subnet:query.get('subnet'),identity:query.get('identity'),hours:quick?Number(quick.dataset.hours):null,from:query.get('from'),to:query.get('to')};
+    const item={...(Object.keys(activeConnectionFilters).length?{connections:activeConnectionFilters}:{}),name,source,mode:$('#mode').value,scope:query.get('scope'),subnet:query.get('subnet'),identity:query.get('identity'),hours:quick?Number(quick.dataset.hours):null,from:query.get('from'),to:query.get('to')};
     const next=savedFilters.filter(filter=>filter.name!==name);next.push(item);
     if(next.length>100)throw Error('savedFiltersLimit');
     persistSavedFilters(next,name);savedFilterFeedback('savedFilterSaved');
@@ -68,7 +73,7 @@ function saveSearchFilter(){
 }
 async function applySavedFilter(){
   const item=savedFilters.find(filter=>filter.name===$('#saved-filter-select').value);if(!item)return;
-  source=item.source;
+  source=item.source;activeConnectionFilters=cleanConnectionFilters(item.connections);
   document.querySelectorAll('[data-source]').forEach(button=>button.classList.toggle('active',button.dataset.source===source));
   $('#sourcedesc').textContent=t(source==='proxy'?'sourceProxy':'sourceFirewall');
   $('#mode').value=item.mode;$('#subnet').value=item.subnet;
@@ -77,7 +82,7 @@ async function applySavedFilter(){
   $('#subnetfield').hidden=item.mode!=='subnet';$('#identityfield').hidden=item.mode!=='identity';
   $('#scope').value=source==='proxy'?'all':item.scope;$('#scope').disabled=source==='proxy';
   if(item.hours!==null)preset(item.hours);
-  else{updateDateBounds();$('#from').value=localValue(new Date(item.from));$('#to').value=localValue(new Date(item.to));document.querySelectorAll('[data-hours]').forEach(button=>button.classList.remove('selected'))}
+  else{updateDateBounds();$('#from').value=localValue(new Date(item.from));$('#to').value=localValue(new Date(item.to));refreshIntervalFields();document.querySelectorAll('[data-hours]').forEach(button=>button.classList.remove('selected'))}
   $('#saved-filter-name').value=item.name;
   try{params()}catch(e){savedFilterFeedback(e.message==='windowError'?'savedFilterExpired':e.message);return}
   savedFilterFeedback('savedFilterLoaded');await load();

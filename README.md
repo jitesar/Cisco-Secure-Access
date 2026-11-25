@@ -43,7 +43,7 @@ If you keep the same S3 path and region, leave both key fields blank to reuse th
 - Choose **Cloud Firewall** or **Web proxy** as the source.
 - Filter by all sources, IP addresses/subnets/ranges, or identity.
 - View received and sent bytes, average throughput over the entire interval, an hourly chart, the 20 most active IP addresses, and CSV, XLS and PDF report exports.
-- Select Internet, Private Access or unclassified firewall traffic, based on the `Private Flow` field. An empty value is unclassified. Web proxy provides a separate Internet traffic view.
+- Select Internet, Private Access or unclassified firewall traffic, based on the `Private Flow` field. When Private Flow is empty, an optional Rule ID mapping can supply the traffic type. Otherwise the record stays unclassified. Web proxy provides a separate Internet traffic view.
 - Use a preset or a custom From–To interval within the last 30 days, ending no later than the current time. The GUI accepts minute-level boundaries.
 
 ### IP filter examples
@@ -66,7 +66,7 @@ Subnet filters match source IP addresses recorded in the logs. NAT may hide the 
 
 ### Explore individual transfers
 
-The **Top source IP addresses** table supports sorting its displayed top 20 addresses by source IP, share, received bytes, sent bytes or total bytes. Select a header again to reverse direction; IP addresses use numeric ordering.
+The **Top source IP addresses** table shows the top 20 addresses by default. Select 50, 100, 250 or 500 to show more. You can sort the displayed addresses by source IP, share, received bytes, sent bytes or total bytes. Select a header again to reverse direction; IP addresses use numeric ordering.
 
 Select a row or source IP in **Top source IP addresses** to open its individual log records. The detail panel preserves the displayed report's source, time interval, subnet/address filter, identity and traffic type. It shows 50 records per page. Select any column header to sort by time, destination, protocol/method, action, received bytes, sent bytes or total bytes. Select the same header again to reverse direction. The active column shows an arrow indicating the sort direction. Sorting applies to the full filtered result before pagination. IP addresses and destination ports use numeric ordering; missing values remain last in both directions.
 
@@ -95,7 +95,7 @@ Firewall and proxy totals are **kept separate** because they measure different l
 
 Each record is assigned to the half-open interval `[from, to)` and an hourly bucket using its log timestamp. Bytes from a long-running session are not distributed across the duration of that session, so the chart does not necessarily represent instantaneous link utilization.
 
-Choose the display time zone in **S3 settings → Date and time display**. It applies to interval inputs, history, charts, synchronization times, transfer details and all report exports. Changing zones preserves the selected absolute interval; internal filters remain UTC. Date order and 12/24-hour conventions follow the territory associated with the IANA zone (for example Czech formatting for Prague and US formatting for New York). UTC and unmapped zones use international British 24-hour formatting. UTC offsets distinguish repeated hours in displayed records. Nonexistent or ambiguous interval boundaries during daylight-saving transitions are rejected; choose a boundary outside that hour. The choice persists in this browser and is included in encrypted configuration backups.
+Choose the display time zone in **S3 settings → Date and time display**. It applies to interval inputs, history, charts, synchronization times, transfer details and all report exports. Changing zones preserves the selected absolute interval; internal filters remain UTC. Czech uses day–month–year dates and a 24-hour clock in every zone. In English, date order and 12/24-hour conventions follow the territory associated with the IANA zone (for example Czech formatting for Prague and US formatting for New York). UTC and unmapped zones use international British 24-hour formatting. UTC offsets distinguish repeated hours in displayed records. Nonexistent or ambiguous interval boundaries during daylight-saving transitions are rejected; choose a boundary outside that hour. The choice persists in this browser and is included in encrypted configuration backups.
 
 ## Export reports
 
@@ -120,9 +120,11 @@ Exports follow the current GUI language. They contain report data such as IP add
 
 The available-history panel shows the first and last cached record for the selected source and warns if the selected interval starts before the available history. Selecting 3, 7 or 30 days changes the reporting interval; it does not create older logs. Enabling S3 export today does not automatically provide a week of historical data.
 
+In **S3 settings → Synchronization and local data**, choose 1–30 days (default 30). You can choose the period before the first connection. **Save period** applies it to the next sync. **Clear older local data** removes records and details older than the saved number of 24-hour periods from the current connection’s cache and reclaims disk space. During cleanup, the settings dialog shows the current phase and elapsed time. Deletion progress uses the number of expired records. Its remaining time is estimated from the observed deletion rate. Disk compaction has a separate estimate based on the previous successful compaction of this cache, when available. Widen the period and sync again to recover records still available in S3.
+
 After the initial connection or configuration restore, refresh data manually using the synchronization button. The importer:
 
-- Checks all 62 date/source directories within the last 31 UTC days, including paginated S3 results. Up to four listing requests run concurrently, so late-arriving logs in older directories remain discoverable.
+- Checks the UTC date folders overlapping the selected rolling window for both sources, including paginated S3 results. Up to four listing requests run concurrently, so late-arriving logs in older directories remain discoverable.
 - Compares the S3 listing with the local key/ETag manifest and downloads only new or changed files. Missing detail fields in an otherwise unchanged cached file do not trigger a full re-download; they are fetched on demand when a transfer is expanded.
 - Downloads up to four files concurrently into a private temporary directory. A single database writer parses one file at a time and commits each complete file atomically. The number of queued downloads is bounded. Newer date directories are prioritized.
 - Displays separate progress for checking S3 folders, importing new/changed files and cleanup, followed by imported/unchanged file counts and elapsed time.
@@ -133,6 +135,16 @@ After the initial connection or configuration restore, refresh data manually usi
 Supported formats include CSV with named headers and headerless v10/v17 files with exactly 34/40 firewall columns or 49/57 proxy columns. Mixed versions during a schema upgrade are supported. Other headerless layouts are rejected to avoid interpreting the wrong columns as byte counters.
 
 A file may be up to 150 MB compressed. At most four compressed downloads are held in temporary storage (up to approximately 600 MB at the file-size limit). Compressed files are read from disk during parsing and temporary files are removed on completion or failure. This version keeps one parsed file and the selected report in memory; very large deployments still require streaming parsed rows and more scalable storage. Late events placed in directories outside the imported date window may be missed. The first and last record timestamps do not prove complete coverage. S3 contents are never modified.
+
+### Firewall classification
+
+Expand **How traffic was classified** to see record counts and combined sent/received bytes for the selected time, IP and identity before applying the traffic type filter. **Most frequent Rule IDs in unclassified transfers** queries up to ten groups on demand, including records without a cached Rule ID.
+
+In **S3 settings → Access policy**, enter the Cisco API key and secret once and select **Load and apply entire policy**. Use a key with `policies.rules:read` and, when Cisco omits the organization ID, `deployments.roamingcomputersOrgInfo:read`. The app stores the credentials in a connection-specific private file beside its configuration (owner read/write on macOS and Linux). It refreshes the policy before each log sync and reuses the last successful snapshot if a refresh fails. The encrypted S3 configuration backup does not include this Cisco API key.
+
+Reports and transfer details use the current policy to match firewall Rule IDs when Private Flow is missing, starting at the rule version's modification timestamp (creation timestamp if modification time is absent). Manual mappings can cover other periods. **Look up rules in Cisco API** still supports individual lookups. See [Cisco Get Rule](https://developer.cisco.com/docs/cloud-security/get-rule/).
+
+After verifying a rule in Cisco Secure Access, open **S3 settings → Access policy**. Expand **Manual mappings for specific periods** and enter the Rule ID, type and optional start/end dates (inclusive UTC calendar days). Rows for one ID must have disjoint validity periods. Save to reclassify cached records at query time. Confirmed Private Flow values take precedence. Mapped transfers carry a “by rule” label, and exported reports include the breakdown. Rule mappings are stored in the local SQLite database for that connection.
 
 ## Configuration and credential storage
 
@@ -148,7 +160,9 @@ The application reads `config.json` and its referenced credentials file from a u
 
 Key fields mask entered values. Files are stored outside the project, with mode `600` for files and `700` for the containing directory on macOS/Linux. These local JSON files are not an encrypted vault. Use encrypted configuration backups for portable copies, or your own secure backup system.
 
-The SQLite cache is stored at `cache/<connection-fingerprint>/traffic.sqlite` within the configuration directory. It is separate for each bucket, prefix and region, and contains actual IP addresses and identities. Keep it out of shared packages. Removing it causes logs to be downloaded again on the next import.
+In **S3 settings → Database directory**, enter the absolute path of an existing writable directory on the external drive, then save. Each connection uses its own subdirectory there. The app reuses an existing cache or builds a new one from S3. Switching locations leaves the original cache on disk. Configuration and credentials stay in the configuration directory. Leave the field blank to use the default location.
+
+By default the SQLite cache is stored at `cache/<connection-fingerprint>/traffic.sqlite` within the configuration directory. It is separate for each bucket, prefix and region, and contains actual IP addresses and identities. Keep it out of shared packages. Removing it causes logs to be downloaded again on the next import.
 
 No customer S3 organization or credentials are hardcoded. The files [config.example.json](config.example.json) and [credentials.example.json](credentials.example.json) contain placeholders only. Credentials are passed to curl through standard input and are not stored in the traffic cache.
 
@@ -206,7 +220,7 @@ The password is neither sent to the server nor stored. During an explicit backup
 
 The dark GUI supports Czech and English through the header selector. The choice is saved in browser localStorage and synchronized between open application tabs. Switching languages preserves the current filters and interval.
 
-Labels, charts, dynamic statistics, known error messages, empty states, measurement notes and CSV headers are localized. Numbers follow the selected GUI language; date/time formatting follows the selected time zone’s regional convention. Native date controls may follow the browser or operating system language. Identity names, technical log field names and S3 error codes remain unchanged.
+Labels, charts, dynamic statistics, known error messages, empty states, measurement notes and CSV headers are localized. Numbers follow the selected GUI language; Czech date and time labels and interval fields use Czech formatting in every time zone. In English, regional formatting follows the selected time zone. Native calendar dialogs may follow the browser or operating system language. Identity names, technical log field names and S3 error codes remain unchanged.
 
 ## Create a distributable ZIP
 

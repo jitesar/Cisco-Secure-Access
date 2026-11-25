@@ -2,18 +2,92 @@
 let transferState=null;
 const TRANSFER_FIELDS={timestamp:'Timestamp',direction:'Direction',protocol:'Protocol',sourceip:'Source IP',sourceport:'Source Port',destinationip:'Destination IP',destinationport:'Destination Port',fqdns:'FQDNs',hostname:'Hostname',servername:'Server Name',action:'Action',ruleid:'Rule ID',rulesetid:'Ruleset ID',firstpackettimestamp:'First Packet Timestamp',lastpackettimestamp:'Last Packet Timestamp',packetssent:'Packets Sent',packetsreceived:'Packets Received',bytessent:'Bytes Sent',bytesreceived:'Bytes Received',destinationcountry:'Destination Country',sourcecountry:'Source Country',awsregion:'AWS Region',datacenter:'Data Center',appid:'App ID',applicationids:'Application IDs',applicationentityname:'Application Entity Name',privateappgroupid:'Private App Group ID',privateflow:'Private Flow',trafficsource:'Traffic Source',internalclientip:'Internal Client IP',externalclientip:'External Client IP',requestmethod:'Request Method',url:'URL',statuscode:'Status Code',contenttype:'Content Type',requestsize:'Request Size',responsesize:'Response Size',responsebodysize:'Response Body Size',identities:'Identities',policyidentitylabel:'Policy Identity Label',identitytypes:'Identity Types',identitytype:'Identity Type',fwblockreason:'FW Block Reason',forwardingmethod:'Forwarding Method',egressip:'Egress IP',egress:'Egress'};
 
+function setConnectionForm(form,values){
+  for(const key of ['scope',...connectionFields])form.elements[key].value=values[key]||(key==='scope'?'all':'');
+  const proxy=(values.source||source)==='proxy';
+  const protocol=form.elements.protocol;
+  const label=protocol.parentElement.querySelector('span');
+  label.dataset.i18n=proxy?'httpMethod':'networkProtocol';
+  label.textContent=t(label.dataset.i18n);
+  protocol.setAttribute('list',proxy?'http-methods':'network-protocols');
+  protocol.placeholder=proxy?'GET, POST, CONNECT…':'TCP, UDP, ICMP…';
+  form.elements.action.setAttribute('list',proxy?'proxy-actions':'firewall-actions');
+  form.elements.action.placeholder=proxy?'ALLOWED':'ALLOW';
+  for(const [field,hidden] of [[form.elements.scope,proxy],[form.elements.destinationport,proxy&&!values.destinationport]]){
+    field.disabled=hidden;
+    field.parentElement.hidden=hidden;
+  }
+}
+function initializeConnectionFilters(){
+  const top=$('#top-connection-filters');
+  const detail=top.cloneNode(true);
+  detail.id='transfer-connection-filters';
+  $('#connection-filter-slot').append(detail);
+  for(const form of [top,detail]){
+    form.querySelector('[data-clear]').onclick=()=>{setConnectionForm(form,{});form.requestSubmit()};
+    form.onsubmit=event=>{
+      event.preventDefault();
+      const filters=cleanConnectionFilters(Object.fromEntries([...new FormData(form)].map(([k,v])=>[k,v.trim()])));
+      const scope=form.elements.scope.value;
+      if(form===top){
+        activeConnectionFilters=filters;
+        $('#scope').value=scope;
+        load();
+      }else if(transferState){
+        for(const key of connectionFields)transferState.query.delete(key);
+        for(const [key,value] of Object.entries(filters))transferState.query.set(key,value);
+        transferState.query.set('scope',scope);
+        transferState.top=null;
+        transferState.summaryJob=null;
+        transferState.summaryError='';
+        transferState.page=1;
+        transferState.data=null;
+        fetchTransfers();
+      }
+    };
+  }
+}
+
 function closeTransfers(){if($('#transfers-dialog').open)$('#transfers-dialog').close();transferState=null}
 function openTransfers(ip){
   if(!current||loading)return;
   const query=new URLSearchParams(current.query);query.set('ip',ip);query.set('revision',current.revision||'0');
-  transferState={query,ip,page:1,sort:'time',direction:'desc',destinationView:query.get('source')==='proxy'?'server':'ip',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
+  const top=current.top.find(row=>row.label===(ip||'Neznámá IP'));
+  transferState={query,ip,top,page:1,sort:'time',direction:'desc',destinationView:query.get('source')==='proxy'?'server':'ip',detailsRevision:null,sortStale:false,data:null,busy:false,failure:'',sequence:0,expanded:new Set(),details:new Map()};
+  setConnectionForm($('#transfer-connection-filters'),Object.fromEntries(query));
   $('#transfers-dialog').showModal();fetchTransfers();
 }
 async function fetchTransfers(){
   const state=transferState;if(!state)return;
   const sequence=++state.sequence;state.busy=true;state.failure='';state.sortStale=false;state.expanded.clear();state.details.clear();renderTransfers();
   const query=new URLSearchParams(state.query);query.set('page',state.page);query.set('sort',state.sort);query.set('direction',state.direction);query.set('destinationView',state.destinationView);if(state.page>1&&state.detailsRevision!==null)query.set('detailsRevision',state.detailsRevision);
-  try{const data=await api('/api/transfers?'+query);if(transferState!==state||sequence!==state.sequence)return;state.data=data;state.detailsRevision=data.detailsRevision}
+  query.set('part',state.top?'items':'preview');
+  try{
+    const data=await api('/api/transfers?'+query);
+    if(transferState!==state||sequence!==state.sequence)return;
+    if(!data.totals&&state.top){
+      data.totals=state.top;
+      data.pages=Math.max(1,Math.ceil(state.top.records/data.pageSize));
+    }
+    state.data=data;
+    state.detailsRevision=data.detailsRevision;
+    if(data.totals)state.top=data.totals;
+    else if(!state.summaryJob){
+      query.set('part','summary');
+      query.set('detailsRevision',data.detailsRevision);
+      const job=api('/api/transfers?'+query);
+      state.summaryJob=job;
+      job.then(summary=>{
+        if(transferState!==state||state.summaryJob!==job)return;
+        state.top=summary.totals;
+        if(state.data)Object.assign(state.data,summary);
+        renderTransfers();
+      }).catch(e=>{
+        if(transferState!==state||state.summaryJob!==job)return;
+        state.summaryJob=null;state.summaryError=e.message;renderTransfers();
+      });
+    }
+  }
   catch(e){if(transferState!==state||sequence!==state.sequence)return;state.data=null;state.failure=e.message}
   finally{if(transferState===state&&sequence===state.sequence){state.busy=false;renderTransfers()}}
 }
@@ -65,25 +139,30 @@ function renderTransfers(){
   }
   $('#transfers-sort-note').hidden=!state.sortStale;$('#transfers-refresh-sort').hidden=!state.sortStale&&state.failure!=='transferSortChanged';
   $('#transfers-refresh-sort').disabled=state.busy;
-  $('#transfers-status').textContent=state.busy?t('transferLoading'):state.failure?translateError(state.failure):data?t('transferSummary',{n:fmt.format(data.totals.records),received:bytes(data.totals.received),sent:bytes(data.totals.sent)}):'';
+  $('#transfers-status').textContent=state.busy?t('transferLoading'):state.failure?translateError(state.failure):data&&!data.totals?(state.summaryError?translateError(state.summaryError):t('transferCounting')):data?t('transferSummary',{n:fmt.format(data.totals.records),received:bytes(data.totals.received),sent:bytes(data.totals.sent)}):'';
   $('#transfers-status').classList.toggle('failure',Boolean(state.failure));
-  $('#transfers-legacy').hidden=!data||data.totals.detailed===data.totals.records;
-  $('#transfers-missing').hidden=!data||!data.totals.missing;
+  $('#transfers-legacy').hidden=!data||(data.totals?.detailed==null?data.items.every(item=>item.available):data.totals?.detailed===data.totals.records);
+  $('#transfers-missing').hidden=!data||!(data.totals?.missing??data.items.some(item=>item.sent===null||item.received===null));
   $('#transfers-refresh').hidden=state.failure!=='transfersChanged'&&state.failure!=='transferUnavailable';
-  $('#transfers-previous').disabled=state.busy||state.sortStale||!data||state.page<=1;$('#transfers-next').disabled=state.busy||state.sortStale||!data||state.page>=data.pages;
-  $('#transfers-page').textContent=data?t('transferPage',{page:state.page,pages:data.pages}):'';
+  $('#transfers-previous').disabled=state.busy||state.sortStale||!data||state.page<=1;$('#transfers-next').disabled=state.busy||state.sortStale||!data||(data.pages!=null?state.page>=data.pages:!data.hasNext);
+  $('#transfers-page').textContent=data?t(data.pages!=null?'transferPage':'transferPageOnly',{page:state.page,pages:data.pages}):'';
   const focused=document.activeElement?.dataset.transferId, scroll=$('#transfers-dialog').scrollTop;
   const tbody=$('#transfers-rows');tbody.replaceChildren();
   if(state.busy||!data)return;
-  if(!data.items.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.textContent=t('emptyTable');row.append(cell);tbody.append(row)}
+  if(!data.items.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=8;cell.textContent=t('emptyTable');row.append(cell);tbody.append(row)}
   for(const item of data.items){
     const tr=document.createElement('tr');tr.className='transfer-row';
     const first=document.createElement('td'),button=document.createElement('button');button.className='transfer-link';button.type='button';button.dataset.transferId=item.id;button.textContent=(state.expanded.has(item.id)?'▾ ':'▸ ')+transferTime(item.ts);button.setAttribute('aria-expanded',String(state.expanded.has(item.id)));if(state.expanded.has(item.id))button.setAttribute('aria-controls','transfer-detail-'+item.id);button.setAttribute('aria-label',t('transferExpand',{time:transferTime(item.ts)}));button.addEventListener('click',()=>toggleTransfer(item));first.append(button);tr.append(first);
+    const scope=['internet','private'].includes(item.scope)?item.scope:'unknown';
+    const badge=document.createElement('span');
+    badge.className='traffic-badge traffic-'+scope;
+    badge.textContent=scope==='private'?'Private':scope==='internet'?'Internet':t('unknownTraffic');
+    tr.insertCell().append(badge);
     for(const value of [transferDestination(item,state.destinationView),transferProtocol(item.protocol),item.action||'—',transferBytes(item.received),transferBytes(item.sent),transferTotal(item)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}
     tr.addEventListener('click',e=>{if(!e.target.closest('button'))toggleTransfer(item)});tbody.append(tr);
     if(!state.expanded.has(item.id))continue;
-    const detailRow=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.className='transfer-detail';cell.id='transfer-detail-'+item.id;
-    cell.append(transferDL([[t('sourceIP'),item.ip||t('unknownIP')],[t('identity'),item.identities.join(', ')||t('transferMissingValue')],[t('trafficType'),t(({private:'private',internet:'internet',unknown:'unknownTraffic'})[item.scope])],[t('transferUTC'),displayTimestamp(item.ts*1000)],[t('csvReceived'),item.received===null?t('transferMissingValue'):item.received],[t('csvSent'),item.sent===null?t('transferMissingValue'):item.sent]]));
+    const detailRow=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=8;cell.className='transfer-detail';cell.id='transfer-detail-'+item.id;
+    cell.append(transferDL([[t('sourceIP'),item.ip||t('unknownIP')],[t('identity'),item.identities.join(', ')||t('transferMissingValue')],[t('transferUTC'),displayTimestamp(item.ts*1000)],[t('csvReceived'),item.received===null?t('transferMissingValue'):item.received],[t('csvSent'),item.sent===null?t('transferMissingValue'):item.sent]]));
     const detail=state.details.get(item.id),message=document.createElement('p');message.className='transfer-note';
     if(!detail||detail.busy)message.textContent=t('transferLoading');
     else if(detail.failure){message.textContent=translateError(detail.failure);const retry=document.createElement('button');retry.type='button';retry.className='secondary';retry.textContent=t('transferRetry');retry.addEventListener('click',()=>{state.details.delete(item.id);state.expanded.delete(item.id);toggleTransfer(item)});cell.append(retry)}

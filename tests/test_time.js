@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
-const context=vm.createContext({Intl,Date});
+const context=vm.createContext({Intl,Date,language:'en'});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/time.js'),'utf8'),context);
 for(const [zone,instant,wall] of [
  ['Europe/Prague','2026-10-23T12:00:00Z','2026-10-23T14:00'],
@@ -27,7 +27,11 @@ assert(context.validTimeZone('UTC'));assert(!context.validTimeZone('bad/time-zon
 // Settings changes preserve the input instants and never replace them with a new preset.
 const fields={'#from':{value:'2026-10-23T14:00'},'#to':{value:'2026-10-23T15:00'}};let persisted=null;
 context.$=id=>fields[id];context.localStorage={setItem:(key,value)=>{persisted=[key,value]}};context.updateFormatters=()=>{};context.updateDateBounds=()=>{};context.applyLanguage=()=>{};
-vm.runInContext("let language='cs';localizeTimeZone=()=>{}",context);
+vm.runInContext("language='cs';localizeTimeZone=()=>{}",context);
+const cz=context.displayTimestamp('2026-10-23T20:00:00Z','America/New_York');
+assert.match(cz,/23\.\s*10\.\s*2026/);assert.match(cz,/16:00:00/);
+assert.match(context.displayTimestamp('2026-10-23T04:00:00Z','America/New_York'),/00:00:00/);
+assert.equal(context.parseCzechInterval(context.czechIntervalValue('2026-10-23T16:00')),'2026-10-23T16:00');
 context.applyTimeZone('America/New_York');assert.equal(fields['#from'].value,'2026-10-23T08:00');assert.equal(fields['#to'].value,'2026-10-23T09:00');assert.equal(persisted[1],'America/New_York');
 context.localStorage.setItem=()=>{throw Error('quota')};assert.throws(()=>context.applyTimeZone('UTC'),/timeZoneStorage/);assert.equal(fields['#from'].value,'2026-10-23T08:00');
 console.log('Time zones: regional 12/24-hour display, fractional offsets, midnight, DST gaps/repeats, instant preservation and persistence failures OK');

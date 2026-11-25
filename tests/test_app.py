@@ -37,6 +37,105 @@ class TrafficTests(unittest.TestCase):
         writer.writerows(rows)
         return gzip.compress(out.getvalue().encode())
 
+    def test_rule_mappings_before_scope_filter_and_across_drilldown(self):
+        t=app.timestamp('2026-10-22 00:00:00')
+        q={'from':'2026-10-21T00:00:00Z','to':'2026-10-22T13:00:00Z','ip':'10.1.0.1','identity':'A','scope':'internet'}
+        rule={'id':'77','scope':'internet','from':'2026-10-22','to':'2026-10-22'}
+        with patch.object(app,'ACTIVE_SETTINGS',{'database':app.DB}):
+            request={'cacheId':app.DB.parent.name,'previous':[],'rules':[rule]}
+            app.save_rule_mappings(request)
+            with self.assertRaisesRegex(ValueError,'settingsReload'):
+                app.save_rule_mappings(request)
+            with self.assertRaisesRegex(ValueError,'invalidRules'):
+                app.save_rule_mappings({**request,'rules':[rule,rule]})
+        with app.connect() as db:
+            for n,(stamp,scope,flow,label) in enumerate([(t,'private','TRUE','A'),(t,'unknown','','A'),
+                    (t-1,'unknown','','A'),(t,'unknown','unexpected','A'),(t,'unknown','','B')]):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('f',n,'firewall',stamp,q['ip'],json.dumps([label]),1,2,scope))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('f',n,json.dumps({'fields':{'privateflow':flow,'ruleid':'77'}})))
+        r=app.report(q)
+        self.assertEqual(r['classification']['private'],{'records':1,'bytes':3})
+        self.assertEqual(r['classification']['mappedInternet'],{'records':1,'bytes':3})
+        self.assertEqual(r['classification']['unknown'],{'records':2,'bytes':6})
+        self.assertEqual(r['totals']['records'],1)
+        item,=app.transfers(q)['items']
+        self.assertEqual((item['scope'],item['mapped']),('internet',True))
+        self.assertEqual(app.unknown_rules({**q,'revision':r['revision']},app.DB),[{'id':'77','records':2,'bytes':6}])
+
+    def test_report_reuses_hours_and_rechecks_changed_boundaries_and_revision(self):
+        base=app.timestamp('2026-10-22T00:00:00Z')
+        with app.connect() as db:
+            db.execute("INSERT INTO metadata VALUES ('cacheRevision','1')")
+            for n,offset in enumerate([0,60,3600,7200,10800]):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',
+                           ('f',n,'proxy',base+offset,'192.0.2.1','[]',n,None,'internet'))
+        query={'source':'proxy','from':'2026-10-22T00:00:00Z','to':'2026-10-22T03:00:00Z'}
+        original=app.report_part
+        calculated=[]
+        def track(key,calculate):
+            def miss():
+                calculated.append(key)
+                return calculate()
+            return original(key,miss)
+        with patch.object(app,'report_part',side_effect=track):
+            first=app.report(query)
+            calculated.clear()
+            self.assertEqual(first,app.report(query))
+            self.assertFalse(calculated)
+            shifted={**query,'from':'2026-10-22T00:01:00Z','to':'2026-10-22T03:01:00Z'}
+            self.assertEqual(app.report(shifted)['totals']['sent'],10)
+            self.assertEqual(len(calculated),2)
+            with app.connect() as db:
+                db.execute("UPDATE metadata SET value='2' WHERE key='cacheRevision'")
+                db.execute('UPDATE events SET sent=10 WHERE rownum=4')
+            self.assertEqual(app.report(shifted)['totals']['sent'],16)
+
+    def test_connection_filters_before_ranking_paging_and_totals(self):
+        stamp=app.timestamp('2026-10-22T12:20:00Z')
+        q={'source':'firewall','from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z'}
+        with app.connect() as db:
+            db.execute("INSERT INTO metadata VALUES ('cacheRevision','1')")
+            for n in range(82):
+                match=n>=30
+                ip='192.0.2.99' if match or n==0 else '192.0.2.'+str(n)
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',('f',n,'firewall',stamp,ip,'[]',1 if match else 200,1,'internet'))
+                fields={'protocol':'17' if match else '6','action':'ALLOW','destinationip':'192.0.2.4',
+                        'destinationport':'53','servername':'dns.example.test','ruleid':'77'}
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('f',n,json.dumps({'fields':fields})))
+        app.report(q)
+        filtered={**q,'protocol':'UDP','action':'allow','destinationip':'192.0.2.4',
+                  'destinationport':'53','servername':'EXAMPLE','ruleid':'77','scope':'internet'}
+        r=app.report(filtered)
+        self.assertEqual([(v['label'],v['records']) for v in r['top']],[('192.0.2.99',52)])
+        result=app.transfers({**filtered,'ip':'192.0.2.99','page':'2'})
+        self.assertEqual((result['pages'],len(result['items']),result['totals']['sent']),(2,2,52))
+        self.assertEqual(app.report({**filtered,'action':'block'})['totals']['records'],0)
+        q={**filtered,'ip':'192.0.2.99'}
+        first=app.transfers({**q,'part':'preview'})
+        self.assertTrue(first['hasNext'])
+        self.assertEqual(len(first['items']),50)
+        self.assertNotIn('totals',first)
+        self.assertEqual(app.transfers({**q,'part':'summary'})['totals'],result['totals'])
+        empty=app.transfers({**q,'part':'preview','action':'DENY'})
+        self.assertFalse(empty['hasNext'])
+        self.assertEqual(empty['totals']['records'],0)
+
+
+    def test_source_ip_ranking_limit(self):
+        q={'from':'2026-10-22T12:00:00Z','to':'2026-10-22T13:00:00Z'}
+        with app.connect() as db:
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',
+                           [('f',i,'firewall',app.timestamp(q['from']),f'192.0.2.{i}','[]',i,0,'unknown') for i in range(1,61)])
+        default=app.report(q)
+        expanded=app.report({**q,'topLimit':'50'})
+        self.assertEqual(len(default['top']),20)
+        self.assertEqual(len(expanded['top']),50)
+        self.assertEqual(default['sourceCount'],60)
+        self.assertEqual(len(app.report({**q,'topLimit':'100'})['top']),60)
+        self.assertEqual(default['top'],expanded['top'][:20])
+        self.assertEqual(expanded['top'][-1]['sent'],11)
+        self.assertEqual(default['totals'],expanded['totals'])
+
     def test_schema_and_missing_counters(self):
         blob = self.blob([
             ['Timestamp', 'Source IP', 'Bytes Sent', 'Bytes Received', 'Identities', 'Private Flow'],
@@ -137,6 +236,10 @@ class TrafficTests(unittest.TestCase):
         second=app.transfers({**params,'page':'2'})
         last=app.transfers({**params,'page':'3'})
         self.assertEqual([len(p['items']) for p in [first,second,last]],[50,50,5])
+        fast=app.transfers({**params,'page':'2','part':'items','revision':first['revision']})
+        self.assertEqual(fast['items'],second['items'])
+        self.assertNotIn('totals',fast)
+        self.assertRaisesRegex(ValueError,'transfersChanged',app.transfers,{**params,'part':'items','revision':'stale'})
         self.assertEqual(first['pages'],3)
         self.assertEqual(len({item['id'] for p in [first,second,last] for item in p['items']}),105)
         self.assertEqual(first['totals']['detailed'],0)
@@ -660,6 +763,211 @@ class SettingsTests(unittest.TestCase):
         for name,value in self.saved.items(): setattr(app,name,value)
         app.STATE.clear();app.STATE.update(self.old_state)
         self.temp.cleanup()
+
+    def test_lookup_policy_scope(self):
+        condition={'attributeName':'umbrella.destination.private_resource_ids','attributeOperator':'INTERSECT','attributeValue':[12]}
+        self.assertEqual(app.policy_scope({'ruleConditions':[condition]}),'private')
+        self.assertIsNone(app.policy_scope({'ruleConditions':[{**condition,'attributeOperator':'NOT_INTERSECT'}]}))
+        self.assertIsNone(app.policy_scope({'ruleAccess':'internet','ruleConditions':[condition]}))
+        self.assertIsNone(app.policy_scope({'ruleName':'Internet Allow'}))
+        self.assertEqual(app.policy_scope({'ruleSettings':[{'settingName':'umbrella.default.traffic','settingValue':'PUBLIC_INTERNET'}]}),'internet')
+        settings={'prefix':'123_test/','bucket':'cisco-managed-region','database':self.folder/'cache'/'sample'/'traffic.sqlite'}
+        payload={'ids':['77'],'clientId':'fake','clientSecret':'dummy','cacheId':'sample'}
+        rule={'ruleId':77,'organizationId':123,'ruleName':'Example'}
+        with patch.object(app,'ACTIVE_SETTINGS',settings):
+            with patch.object(app,'policy_request',side_effect=[{'access_token':'sample'},rule.copy(),
+                    {'result':[{**rule,'ruleAccess':'internet'}]}]):
+                self.assertEqual(app.lookup_policy_rules(payload)['rules'][0]['scope'],'internet')
+            with patch.object(app,'policy_request',side_effect=[{'access_token':'sample'},{**rule,'organizationId':999}]):
+                self.assertEqual(app.lookup_policy_rules(payload)['rules'][0]['error'],'policyOrg')
+            with patch.object(app,'policy_request',side_effect=[{'access_token':'sample'},
+                    {'ruleId':77}, {'count':2,'result':[{'ruleId':22}]},
+                    {'count':2,'result':[{**rule,'ruleAccess':'private'}]}, {}, {'result':{'ruleId':79}}, {'organizationId':999}]):
+                results=app.lookup_policy_rules({**payload,'ids':['77','78','79']})['rules']
+                self.assertEqual(results[0]['scope'],'private')
+                self.assertEqual(results[1]['error'],'policyNotFound')
+                self.assertEqual(results[2]['error'],'policyOrg')
+
+    def test_policy_lookup_shared_failure_preserves_cause_and_independent_rules(self):
+        settings={'prefix':'123_test/','bucket':'cisco-managed-region','database':self.folder/'sample'/'traffic.sqlite'}
+        payload={'ids':['1','2','3'],'clientId':'test','clientSecret':'dummy','cacheId':'sample'}
+        failure=app.PolicyResponseError('list','http',503)
+        responses=[{'access_token':'sample'},{'ruleId':1},failure,{'ruleId':2},
+                   {'ruleId':3,'organizationId':123,'ruleSettings':[{'settingName':'umbrella.default.traffic','settingValue':'PRIVATE_NETWORK'}]}]
+        with patch.object(app,'ACTIVE_SETTINGS',settings),patch.object(app,'policy_request',side_effect=responses) as request:
+            results=app.lookup_policy_rules(payload)['rules']
+            self.assertEqual([r.get('error') for r in results], [str(failure),str(failure),None])
+            self.assertEqual(results[-1]['scope'],'private')
+            self.assertEqual(sum('offset=' in c.args[1] for c in request.call_args_list),1)
+
+    def test_saved_access_policy_applies_to_existing_cache(self):
+        connection=app.update_connection(self.payload,save=True)
+        settings=app.ACTIVE_SETTINGS
+        data={'cacheId':connection['cacheId'],'clientId':'sample','clientSecret':'dummy'}
+        instant='2026-10-22T12:00:00Z'
+        rows=[{'ruleId':i,'ruleAccess':kind,'modifiedAt':instant} for i,kind in [(1,'private'),(2,'internet')]]
+        with app.connect() as db:
+            for i in (1,2):
+                db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)',
+                           ('f',i,'firewall',app.timestamp(instant),'192.0.2.1','[]',10,1,'unknown'))
+                db.execute('INSERT INTO event_details VALUES (?,?,?)',('f',i,json.dumps({'fields':{'ruleid':str(i)}})))
+        responses=[{'access_token':'example'},{'result':rows}]
+        with patch.object(app,'policy_request',side_effect=responses*2) as request:
+            initial=app.refresh_access_policy(data)
+            self.assertEqual((initial['total'],initial['mapped']),(2,2))
+            self.assertEqual(app.refresh_access_policy({'cacheId':data['cacheId']}),initial)
+            self.assertEqual(request.call_args_list[2],request.call_args_list[0])
+        self.assertTrue(app.public_settings()['hasPolicyCredentials'])
+        self.assertNotIn('dummy',json.dumps(app.public_settings()))
+        if app.os.name!='nt':
+            self.assertEqual(app.policy_key_path(settings).stat().st_mode&0o777,0o600)
+        with patch.object(app,'policy_request',side_effect=app.PolicyResponseError('token','http',401)):
+            self.assertRaises(app.PolicyResponseError,app.refresh_access_policy,data)
+        query={'from':instant,'to':'2026-10-22T13:00:00Z'}
+        with patch.object(app,'utc_now',return_value=dt.datetime(2026,10,22,13,tzinfo=app.UTC)):
+            for kind in ('private','internet'):
+                report=app.report({**query,'scope':kind})
+                self.assertEqual(report['classification']['mapped'+kind.title()],{'records':1,'bytes':11})
+                self.assertEqual(report['totals']['records'],1)
+
+    def test_whole_policy_paginates_and_fetches_only_missing_details(self):
+        settings={'prefix':'123_test/','bucket':'cisco-managed-region','database':self.folder/'sample'/'traffic.sqlite'}
+        payload={'wholePolicy':True,'clientId':'test','clientSecret':'dummy','cacheId':'sample'}
+        rows=[{'ruleId':i,'ruleAccess':'internet','modifiedAt':'2026-11-13T12:00:00Z'} for i in range(1,102)]
+        rows[-1].pop('ruleAccess')
+        responses=[{'access_token':'test'},{'count':101,'result':rows[:100]},
+                   {'count':101,'result':rows[100:]},{'organizationId':123},
+                   {'ruleId':101,'ruleAccess':'private'}]
+        with patch.object(app,'ACTIVE_SETTINGS',settings),patch.object(app,'policy_request',side_effect=responses) as request:
+            result=app.lookup_policy_rules(payload)['rules']
+        self.assertEqual([r['scope'] for r in result],['internet']*100+['private'])
+        self.assertEqual([c.args[1] for c in request.call_args_list][1:],
+                         ['/policies/v2/rules?limit=100&offset=0','/policies/v2/rules?limit=100&offset=100',
+                          '/deployments/v2/roamingcomputers/orgInfo','/policies/v2/rules/101'])
+
+    def test_orginfo_fallback_for_batch(self):
+        settings={'prefix':'123_test/','bucket':'cisco-managed-region','database':self.folder/'sample'/'traffic.sqlite'}
+        payload={'ids':['1','2'],'clientId':'test','clientSecret':'dummy','cacheId':'sample'}
+        rules=[{'ruleId':i,'ruleAccess':'internet'} for i in (1,2)]
+        for reply,expected in [({'organizationId':123},None),({'organizationId':999},'policyOrg'),
+                               (app.PolicyResponseError('org','http',403),'policyResponse/org/http/403')]:
+            responses=[{'access_token':'test'},rules[0],{'result':rules},reply,rules[1]]
+            with patch.object(app,'ACTIVE_SETTINGS',settings),patch.object(app,'policy_request',side_effect=responses) as request:
+                rows=app.lookup_policy_rules(payload)['rules']
+                self.assertEqual([row.get('error') for row in rows],[expected]*2)
+                self.assertEqual([row['scope'] for row in rows],[None if expected else 'internet']*2)
+                self.assertEqual(request.call_args_list[3].args,('GET','/deployments/v2/roamingcomputers/orgInfo','Bearer test'))
+
+    def test_policy_http_diagnostics_and_envelopes(self):
+        with patch.object(app.http.client,'HTTPSConnection') as connection:
+            response=connection.return_value.getresponse.return_value
+            response.status=429
+            with self.assertRaisesRegex(app.PolicyResponseError,'policyResponse/detail/http/429'):
+                app.policy_request('GET','/policies/v2/rules/77','Bearer dummy')
+            response.status=200
+            response.read.return_value=b'<html>private diagnostic data</html>'
+            with self.assertRaisesRegex(app.PolicyResponseError,'^policyResponse/list/json/200$'):
+                app.policy_request('GET','/policies/v2/rules?limit=100','Bearer dummy')
+            response.read.return_value=b'{"data":{"result":[{"ruleId":77}],"count":1}}'
+            self.assertEqual(app.policy_request('GET','/policies/v2/rules?limit=100','Bearer dummy')['result'],[{'ruleId':77}])
+
+    def test_nested_catalog_and_detail_over_http(self):
+        settings={'prefix':'123_test/','bucket':'cisco-managed-region','database':self.folder/'sample'/'traffic.sqlite'}
+        payload={'ids':['77','78'],'clientId':'test','clientSecret':'dummy','cacheId':'sample'}
+        rule={'ruleId':77,'organizationId':123,'ruleAccess':'internet'}
+        replies=[{'access_token':'test'}, {'data':{'rule':{'ruleId':77}}},
+                 {'count':2,'result':{'items':[{'ruleId':4}]}},
+                 {'count':2,'result':{'items':[rule]}},
+                 {'data':{'rule':{**rule,'ruleId':78,'organizationId':90}}}]
+        with patch.object(app,'ACTIVE_SETTINGS',settings),patch.object(app.http.client,'HTTPSConnection') as connection:
+            response=connection.return_value.getresponse.return_value
+            response.status=200
+            response.read.side_effect=[json.dumps(reply).encode() for reply in replies]
+            first,second=app.lookup_policy_rules(payload)['rules']
+            self.assertEqual(first['scope'],'internet')
+            self.assertEqual(second['error'],'policyOrg')
+        with self.assertRaises(app.PolicyResponseError) as error:
+            app.policy_payload({'result':{'message':'confidential','private-field':'secret'}},'list')
+        self.assertEqual(error.exception.structure,'$.result (message=str)')
+
+    def test_prune_phase_estimates(self):
+        with patch.dict(app.PRUNE_PROGRESS, clear=True), patch.object(app.time,'monotonic',return_value=100) as clock:
+            app.prune_phase('deleting',done=0,total=100)
+            self.assertNotIn('remaining',app.prune_status())
+            app.PRUNE_PROGRESS['done']=25
+            clock.return_value=110
+            self.assertEqual(app.prune_status()['remaining'],30)
+            app.prune_phase('compacting',estimate=None)
+            self.assertNotIn('remaining',app.prune_status())
+            app.prune_phase('compacting',estimate=20)
+            clock.return_value=115
+            self.assertEqual(app.prune_status()['remaining'],15)
+            clock.return_value=140
+            self.assertNotIn('remaining',app.prune_status())
+
+    def test_custom_cache_location_and_return_to_default(self):
+        default=app.update_connection(self.payload,save=True)
+        original=app.DB
+        with app.connect() as db:
+            db.execute("INSERT INTO metadata VALUES ('test-marker','original')")
+        target=self.folder/'external'
+        target.mkdir()
+        request={**self.payload,'cacheDirectory':str(target),'accessKeyId':'','secretAccessKey':''}
+        selected=app.update_connection(request,save=True)
+        self.assertEqual(app.DB,target/original.parent.name/'traffic.sqlite')
+        self.assertNotEqual(default['cacheId'],selected['cacheId'])
+        self.assertEqual(app.load_settings(app.CONFIG_PATH)['database'],app.DB)
+        self.assertEqual(app.CREDENTIALS.parent,self.folder)
+        with app.connect() as db:
+            self.assertIsNone(db.execute("SELECT value FROM metadata WHERE key='test-marker'").fetchone())
+        target.rename(self.folder/'disconnected')
+        with self.assertRaisesRegex(ValueError,'cachePathUnavailable'),app.connect():
+            pass
+        self.assertFalse(target.exists())
+        with self.assertRaisesRegex(ValueError,'cachePathInvalid'):
+            app.update_connection({**request,'cacheDirectory':'relative'},save=True)
+        app.update_connection({**request,'cacheDirectory':''},save=True)
+        self.assertEqual(app.DB,original)
+        with app.connect() as db:
+            self.assertEqual(db.execute("SELECT value FROM metadata WHERE key='test-marker'").fetchone()[0],'original')
+
+    def test_sync_window_prune_and_widen(self):
+        result = app.update_connection(self.payload,save=True)
+        options = {'cacheId':result['cacheId'],'syncDays':1}
+        now = dt.datetime(2026,10,22,18,tzinfo=app.UTC)
+        folder = app.PREFIX+'firewalllogs/2026-10-21/'
+        key = folder+'mixed.csv.gz'
+        blob = gzip.compress(b'Timestamp,Source IP,Bytes Sent,Bytes Received\n'
+                             b'2026-10-21 17:59:59,192.0.2.1,1,2\n'
+                             b'2026-10-21 18:00:00,192.0.2.2,3,4\n')
+        with patch.object(app,'utc_now',return_value=now), patch.object(app,'S3') as client:
+            source = client.return_value
+            source.list.side_effect = lambda path: [(key,'etag')] if path==folder else []
+            source.download.side_effect = lambda key,path: Path(path).write_bytes(blob)
+            app.ingest()
+            app.update_sync_window(options)
+            self.assertEqual(app.load_settings(app.CONFIG_PATH)['syncDays'],1)
+            source.list.reset_mock()
+            app.ingest()
+            self.assertEqual(source.list.call_count,4)
+            self.assertEqual(source.download.call_count,1)
+            self.assertEqual(app.update_sync_window(options,prune=True)['removed'],1)
+            app.ingest()
+            self.assertEqual(source.download.call_count,1)
+            with app.connect() as db:
+                self.assertEqual(db.execute('SELECT ip FROM events').fetchone()[0],'192.0.2.2')
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM event_details').fetchone()[0],1)
+            app.update_sync_window({**options,'syncDays':2})
+            app.ingest()
+            self.assertEqual(source.download.call_count,2)
+            with app.connect() as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM events').fetchone()[0],2)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM event_details').fetchone()[0],2)
+            for invalid in (0,31,True,0.5,'1'):
+                with self.assertRaisesRegex(ValueError,'invalidSyncDays'):
+                    app.update_sync_window({**options,'syncDays':invalid})
+            with self.assertRaisesRegex(ValueError,'saveWindowFirst'):
+                app.update_sync_window(options,prune=True)
 
     def test_probe_does_not_save_credentials(self):
         self.assertTrue(app.update_connection(self.payload)['ok'])
